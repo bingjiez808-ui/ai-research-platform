@@ -147,8 +147,16 @@ export default function Dashboard({ onStockSelect }) {
               <span>来源：腾讯行情枚举</span>
               {breadth.scope?.shanghai && <span>沪 {breadth.scope.shanghai.valid}</span>}
               {breadth.scope?.shenzhen && <span>深 {breadth.scope.shenzhen.valid}</span>}
-              {breadth.scope?.suspendedInvalid && <span>无效/退市 {breadth.scope.suspendedInvalid.count}</span>}
+              {breadth.scope?.suspendedInvalid && <span>无效/停牌 {breadth.scope.suspendedInvalid.count}</span>}
               {breadth.scope?.beijing?.included === false && <span>北交所未计入</span>}
+              {breadth.scope?.universe && (
+                <span className="universe-auth">
+                  权威范围 {breadth.scope.universe.total} 只（Tushare：沪 {breadth.scope.universe.byExchange?.SSE}/深 {breadth.scope.universe.byExchange?.SZSE}/北 {breadth.scope.universe.byExchange?.BSE}）
+                </span>
+              )}
+              {!breadth.scope?.universe && breadth.scope?.basis === 'generated-candidates' && (
+                <span>统计范围：生成候选（非权威）</span>
+              )}
             </div>
             {breadth.message && <div className={`breadth-msg ${breadthStatus}`}>{breadth.message}</div>}
           </>

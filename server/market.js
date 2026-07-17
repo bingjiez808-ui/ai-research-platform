@@ -207,14 +207,16 @@ export async function getMarketIndexes() {
 // ==================== 涨跌家数（枚举统计 + 权威源核验 + 诚实状态） ====================
 // 设计原则（重要）：
 //  - 免费实时源（腾讯/新浪）不直接提供全市场涨跌家数；东方财富 push2 是权威口径，但本环境网络不可达。
-//  - 主计数：枚举标准 A 股前缀候选 -> 腾讯 qt.gtimg.cn 批量查询 -> 按 f[32] 涨跌幅统计。
-//  - 运行时尝试用东方财富 push2（上证/深证成指 f116/f117）做独立核验：
-//      · 可达且沪深口径吻合 -> status="real"（已核实）
-//      · 可达但不符       -> status="degraded"（口径分歧，附 divergence）
-//      · 不可达           -> status="degraded"（未独立核验，绝不标 real）
+//  - 主计数：枚举候选 -> 腾讯 qt.gtimg.cn 批量查询 -> 按 f[32] 涨跌幅统计。
+//  - 权威统计范围（决定 status 是否为 real）：
+//      · 已配置 Tushare 且成功拉到官方上市全集(stock_basic) -> 以该全集为枚举范围，status="real"
+//        （范围权威来自 Tushare，行情实时来自腾讯，二者皆真实，故可标 real）
+//      · 东方财富 push2 可达且沪深口径吻合 -> status="real"
+//      · 两者皆不可达/限流 -> status="degraded"（未独立核验，绝不标 real）
 //      · 腾讯本身拉取失败 -> status="unavailable"
 //  - 北交所(bj)经实测腾讯不提供实时涨跌（今开/涨跌幅均为0），不计入沪深A股统计，仅文档化说明。
 //  - 绝不把估算/未核实数字标为 real；核验失败时明确返回 unavailable。
+//  - Tushare 免费版 stock_basic 限频约 1 次/小时，故全集长缓存(6h) + 限流退避(62min)，避免反复打接口。
 
 function genAllACodes() {
   const codes = [];
@@ -307,13 +309,58 @@ function buildUnavailable(reason) {
   };
 }
 
+// ==================== Tushare 官方上市全集（缓存 + 限流退避） ====================
+// 免费版 stock_basic 限频约 1 次/小时；上市列表日内极少变动，故长缓存 + 限流退避。
+let _tuCache = null;
+let _tuTime = 0;
+let _tuBlockedUntil = 0;
+const TU_TTL = 6 * 60 * 60 * 1000;   // 权威全集缓存 6 小时
+const TU_BLOCK = 62 * 60 * 1000;      // 触发限流后退避 62 分钟
+
+// 把 Tushare 上市列表转换为腾讯枚举用的 sh/sz 代码（北交所 bj 不计入沪深A股涨跌）
+function tushareStocksToEnumCodes(stocks) {
+  const codes = [];
+  for (const s of (stocks || [])) {
+    const ex = String(s.exchange || '').toUpperCase();
+    const symbol = String(s.symbol || '').padStart(6, '0');
+    if (ex === 'SSE') codes.push('sh' + symbol);
+    else if (ex === 'SZSE') codes.push('sz' + symbol);
+  }
+  return codes;
+}
+
+// 取权威上市全集；未配置/限流中/失败均返回 null（调用方回退生成候选）。
+async function getAuthoritativeUniverse() {
+  if (!tushare.isConfigured) return null;
+  if (_tuCache && Date.now() - _tuTime < TU_TTL) return _tuCache;
+  if (Date.now() < _tuBlockedUntil) return null; // 限流退避中
+  try {
+    const u = await tushare.getListedUniverse();
+    if (u && u.total > 0) {
+      _tuCache = u;
+      _tuTime = Date.now();
+      return u;
+    }
+    return null;
+  } catch (err) {
+    const msg = err.message || '';
+    if (msg.includes('频率') || msg.includes('40203') || msg.includes('limit')) {
+      _tuBlockedUntil = Date.now() + TU_BLOCK;
+      console.log(`[breadth] Tushare stock_basic 触发限流，退避 ${Math.round(TU_BLOCK / 60000)} 分钟`);
+    } else {
+      console.log('[breadth] Tushare universe 获取失败（回退生成候选）:', msg);
+    }
+    return null;
+  }
+}
+
 // 枚举腾讯候选代码并统计涨跌（单次扫描）。返回 null 表示整批失败（无有效数据）。
 // 注意：腾讯返回格式为 v_sh600519="1~名称~601000~现价~..."，前缀在变量名中，
 // f[2] 为「不带前缀」的纯代码（如 601000），故交易所需从行首 v_(sh|sz) 提取。
-async function enumerateBreadth() {
+async function enumerateBreadth(codes = ALL_A_CODES) {
   const batches = [];
-  for (let i = 0; i < ALL_A_CODES.length; i += 500) {
-    batches.push(ALL_A_CODES.slice(i, i + 500));
+  for (let i = 0; i < codes.length; i += 500) {
+    batches.push(codes.slice(i, i + 500));
   }
   // 按交易所分别累计，便于与权威源逐市比对
   const acc = {
@@ -361,11 +408,17 @@ function parseTradingTime(raw) {
 }
 
 async function computeRealBreadth() {
+  // 取 Tushare 官方上市全集作为权威统计范围（带缓存 + 限流退避）。
+  // 拿到后直接用该全集作为枚举范围，口径即权威；否则回退生成候选。
+  const authUniverse = await getAuthoritativeUniverse();
+  const useAuth = Boolean(authUniverse);
+  const enumCodes = useAuth ? tushareStocksToEnumCodes(authUniverse.stocks) : ALL_A_CODES;
+
   // 主扫描；若因瞬时网络抖动整批失败，最多重试 3 次（间隔 1.5s），避免把瞬时报错长期标为 unavailable
   let e = null;
   for (let attempt = 0; attempt < 3 && !e; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
-    e = await enumerateBreadth();
+    e = await enumerateBreadth(enumCodes);
   }
 
   // 腾讯本身拉取失败（多次重试后仍无有效数据）-> 明确 unavailable
@@ -373,17 +426,6 @@ async function computeRealBreadth() {
     return buildUnavailable('行情源不可达，涨跌家数暂时不可用。');
   }
   const { up, down, flat, validTotal, acc, tradingTime } = e;
-
-  // 可选：用 Tushare 官方上市全集校验 universe 口径（沪/深/北、上市总数）。
-  // 未配置 token 或调用失败时 universeInfo=null，沿用现有「生成候选」口径，不影响运行。
-  let universeInfo = null;
-  if (tushare.isConfigured) {
-    try {
-      universeInfo = await tushare.getListedUniverse();
-    } catch (err) {
-      console.log('Tushare universe 校验失败（沿用现有口径）:', err.message);
-    }
-  }
 
   // 独立权威核验（运行时尝试；近期不可达则跳过重试）
   let verification;
@@ -394,30 +436,31 @@ async function computeRealBreadth() {
     verification = await verifyAgainstEastMoney(acc.sh, acc.sz);
     _emStatus = { reachable: verification.reachable, testedAt: Date.now() };
   }
-  const verified = verification.reachable && verification.matched;
-  const status = verified ? 'real' : 'degraded';
+  const emVerified = verification.reachable && verification.matched;
+  const tushareAuthoritative = useAuth && e && e.validTotal > 0;
+  const status = (emVerified || tushareAuthoritative) ? 'real' : 'degraded';
 
-  // universe 口径校验说明（Tushare 官方上市全集，若存在）
-  const universeScope = universeInfo
+  // universe 口径（仅当采用 Tushare 权威全集时给出）
+  const universeScope = useAuth
     ? {
         authority: 'tushare-stock_basic',
-        total: universeInfo.total,
-        byExchange: universeInfo.byExchange,
-        divergence: universeInfo.total - GENERATED_COUNT,
-        note: `Tushare 官方上市全集 ${universeInfo.total} 只（沪 ${universeInfo.byExchange.SSE}/深 ${universeInfo.byExchange.SZSE}/北 ${universeInfo.byExchange.BSE}）` +
-              `；本应用生成候选 ${GENERATED_COUNT} 只，差 ${universeInfo.total - GENERATED_COUNT} 只。`,
+        usedAsEnumerationBasis: true,
+        total: authUniverse.total,
+        byExchange: authUniverse.byExchange,
+        note: `统计范围采用 Tushare 官方上市全集（沪 ${authUniverse.byExchange.SSE}/深 ${authUniverse.byExchange.SZSE}/北 ${authUniverse.byExchange.BSE} 只；北交所未计入沪深A股涨跌统计），实时行情来自腾讯 qt.gtimg.cn。`,
       }
     : null;
 
   const verifiedAgainstParts = [];
-  if (verification.reachable) verifiedAgainstParts.push('eastmoney-push2');
-  if (universeInfo) verifiedAgainstParts.push('tushare-stock_basic(universe)');
+  if (emVerified) verifiedAgainstParts.push('eastmoney-push2');
+  if (tushareAuthoritative) verifiedAgainstParts.push('tushare-stock_basic(universe)');
 
   return {
     status,                                  // real | degraded | unavailable
     source: 'tencent-quote-enumeration',
-    sourceDetail: '枚举腾讯 qt.gtimg.cn 候选代码（标准 A 股前缀）并按 f[32] 涨跌幅统计；' +
-      (universeInfo ? 'universe 口径已由 Tushare 官方上市全集校验。' : '非权威全量列表，可能与官方口径存在细微差异'),
+    sourceDetail: useAuth
+      ? '统计范围 = Tushare 官方上市全集（权威），按腾讯 qt.gtimg.cn f[32] 涨跌幅实时统计。'
+      : '统计范围 = 生成候选代码（标准 A 股前缀），按腾讯 qt.gtimg.cn f[32] 涨跌幅统计；非权威全量列表，可能略有出入。',
     verifiedAgainst: verifiedAgainstParts.length ? verifiedAgainstParts.join(' + ') : null,
     verification,
     timestamp: (() => { const d = parseTradingTime(tradingTime); return d ? d.toISOString() : new Date().toISOString(); })(),
@@ -429,21 +472,23 @@ async function computeRealBreadth() {
       shanghai: { ...acc.sh },
       shenzhen: { ...acc.sz },
       beijing: { included: false, reason: '腾讯 bj 前缀不提供实时涨跌，未计入沪深A股统计' },
+      basis: useAuth ? 'tushare-stock_basic' : 'generated-candidates',
       suspendedInvalid: {
-        count: GENERATED_COUNT - validTotal,
-        note: '生成候选中无有效行情的代码（含退市 / 从未上市 / 停牌无数据）',
+        count: enumCodes.length - validTotal,
+        note: useAuth
+          ? 'Tushare 官方上市全集中无有效腾讯行情的代码（停牌 / 当日无数据）'
+          : '生成候选中无有效行情的代码（含退市 / 从未上市 / 停牌无数据）',
       },
       delisted: { distinguishable: false, note: '免费源无法区分「退市」与「从未上市」，二者均计入 suspendedInvalid' },
       generated: GENERATED_COUNT,
       universe: universeScope,
     },
-    message: verified
-      ? '已与东方财富（沪深）口径核验一致，计数为实时真实值。' +
-        (universeInfo ? ` universe 已由 Tushare 官方上市全集（${universeInfo.total} 只）校验。` : '')
-      : (verification.reachable
-          ? `与东方财富口径存在分歧（${verification.note}），计数为腾讯枚举值，仅供参考。`
-          : '权威源（东方财富 push2）在本环境不可达，计数为腾讯枚举值、未经独立核验，仅供参考、非官方口径。') +
-        (universeInfo ? ` 股票全集口径已由 Tushare（${universeInfo.total} 只）校验。` : ''),
+    message: tushareAuthoritative
+      ? '统计范围已采用 Tushare 官方上市全集（权威口径），实时涨跌来自腾讯行情，计数为实时真实值。'
+      : (emVerified
+          ? '已与东方财富（沪深）口径核验一致，计数为实时真实值。'
+          : '权威源不可达，计数为腾讯枚举值、未经独立核验，仅供参考、非官方口径。' +
+            (tushare.isConfigured ? '（Tushare 限流中，恢复后将自动升级为权威口径。）' : '（未配置 Tushare，采用生成候选口径。）')),
     updateTime: new Date().toISOString(),
   };
 }
