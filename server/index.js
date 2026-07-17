@@ -314,8 +314,18 @@ app.get('/api/health', (req, res) => {
 
 // ==================== 临时诊断：Tushare 配置与连通性 ====================
 app.get('/api/debug/tushare', async (req, res) => {
+  // 列出所有 env key 名（不含值），用于发现隐藏字符/拼写差异
+  const allKeys = Object.keys(process.env);
+  const tokenLike = allKeys.filter(k => /tush|token/i.test(k));
   const configured = Boolean(process.env.TUSHARE_TOKEN);
-  const info = { configured, nodeEnv: process.env.NODE_ENV || null, envKeyPresent: configured };
+  const info = {
+    configured,
+    nodeEnv: process.env.NODE_ENV || null,
+    envKeyPresent: configured,
+    envKeyCount: allKeys.length,
+    keysContainingTokenOrTush: tokenLike,
+    exactTushareKeyPresent: allKeys.includes('TUSHARE_TOKEN'),
+  };
   if (configured) {
     try {
       const u = await tushare.getListedUniverse();
