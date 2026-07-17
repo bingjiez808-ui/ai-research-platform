@@ -15,6 +15,7 @@ import {
   getConceptRanking,
   getStockNotices,
 } from './market.js';
+import * as tushare from './tushare.js';
 import {
   computeSixDScore,
   generateConclusion,
@@ -309,6 +310,24 @@ app.post('/api/portfolio/analyze', async (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// ==================== 临时诊断：Tushare 配置与连通性 ====================
+app.get('/api/debug/tushare', async (req, res) => {
+  const configured = Boolean(process.env.TUSHARE_TOKEN);
+  const info = { configured, nodeEnv: process.env.NODE_ENV || null, envKeyPresent: configured };
+  if (configured) {
+    try {
+      const u = await tushare.getListedUniverse();
+      info.probe = 'ok';
+      info.total = u && u.total;
+      info.byExchange = u && u.byExchange;
+    } catch (e) {
+      info.probe = 'error';
+      info.error = e.message;
+    }
+  }
+  res.json({ success: true, data: info });
 });
 
 // ==================== 生产环境静态文件服务 ====================
