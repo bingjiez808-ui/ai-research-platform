@@ -6,35 +6,15 @@
 //           直接回应"不要用生成的代码宇宙冒充权威"的诚实要求。
 //  - 用途 2：best-effort 补充 PE/PB 等基本面（daily_basic），覆盖腾讯基础接口无字段的情况。
 //  - 绝不把本站枚举值标为 Tushare 口径；Tushare 不可达/限流时静默跳过，沿用现有数据。
-import axios from 'axios';
+import { TushareProvider } from './finance/providers/tushare.js';
 
-const TOKEN = process.env.TUSHARE_TOKEN;
-export const isConfigured = Boolean(TOKEN);
-
-const tushareApi = axios.create({
-  baseURL: 'https://api.tushare.pro',
-  timeout: 12000,
-  headers: { 'Content-Type': 'application/json' },
-});
+const provider = new TushareProvider();
+export const isConfigured = provider.isConfigured();
 
 // 调用 Tushare HTTP 接口；未配置 token 直接返回 null。
 async function callTushare(apiName, params = {}, fields = '') {
   if (!isConfigured) return null;
-  const res = await tushareApi.post('', { api_name: apiName, token: TOKEN, params, fields });
-  const body = res.data;
-  if (!body || body.code !== 0) {
-    throw new Error(body?.msg || `Tushare ${apiName} 返回异常 code=${body?.code}`);
-  }
-  return body.data; // { fields: [...], items: [[...]] }
-}
-
-function rowsToObjects(data) {
-  if (!data || !data.fields || !data.items) return [];
-  return data.items.map((it) => {
-    const o = {};
-    data.fields.forEach((k, i) => { o[k] = it[i]; });
-    return o;
-  });
+  return provider.call(apiName, params, fields);
 }
 
 // 把 6 位 A 股代码转 Tushare ts_code（含北交所 .BJ）
@@ -57,7 +37,7 @@ export async function getListedUniverse() {
     list_status: 'L',
     fields: 'ts_code,symbol,name,exchange,list_status,delist_date',
   });
-  const all = rowsToObjects(data);
+  const all = Array.isArray(data) ? data : [];
   const byExchange = { SSE: 0, SZSE: 0, BSE: 0, OTHER: 0 };
   for (const r of all) {
     const ex = String(r.exchange || '').toUpperCase();
@@ -82,7 +62,7 @@ export async function getDailyBasic(tsCode) {
         trade_date: tradeDate,
         fields: 'ts_code,trade_date,pe_ttm,pb,pe,turnover_rate,total_mv,circ_mv',
       });
-      const rows = rowsToObjects(data);
+      const rows = Array.isArray(data) ? data : [];
       if (rows.length) return rows[0];
     } catch {
       // 该日无数据（非交易日），继续往前找
