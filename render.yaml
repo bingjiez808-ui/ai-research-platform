@@ -17,7 +17,9 @@ services:
     region: oregon
     # 不写死 branch：Render 会自动使用所连仓库的默认分支（main/master 等）
     # Render 会先自动执行 npm install，再执行 buildCommand
-    buildCommand: npm install && npm run build
+    # NODE_ENV=production makes npm omit devDependencies by default, while the
+    # frontend compiler (Vite) intentionally lives in devDependencies.
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
