@@ -11,6 +11,21 @@
 
 services:
   - type: web
+    name: tushare-sdk-worker
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: workers/tushare
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: TUSHARE_HTTP_URL
+        value: https://fastapic.stockai888.top
+      - key: TUSHARE_CALLS_PER_MINUTE
+        value: "90"
+
+  - type: web
     name: ai-research-platform
     runtime: node
     plan: free
@@ -37,6 +52,10 @@ services:
         value: "true"
       - key: CNINFO_ENABLED
         value: "true"
+      - key: TUSHARE_WORKER_URL
+        value: http://tushare-sdk-worker:10000
+      - key: TUSHARE_ALLOW_DIRECT_FALLBACK
+        value: "false"
       - key: FINANCE_LLM_PROVIDER
         value: deepseek
       - key: FINANCE_LLM_BASE_URL
