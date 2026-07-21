@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getPrisma } from '../research/prisma.js';
-import { getMarketIndexes, getMarketBreadth } from '../market.js';
+import { getMarketIndexes, getMarketBreadth, getStockQuotes } from '../market.js';
 import { getIndustryRanking } from '../eastmoney.js';
 import { marketAnalyst, stockResearch } from './agents/index.js';
 import { analyzePortfolio, ownerKey } from './portfolio/service.js';
@@ -10,10 +10,12 @@ const asNumber = value => value == null ? null : Number(value);
 const clamp = value => Math.max(0, Math.min(100, value));
 const disclosure = '透明确定性规则，仅供研究；不预测收益、不构成投资建议。行情可能延迟，历史信号不代表未来表现。';
 
+async function realtimeIndustryRanking(){const db=getPrisma(),stocks=await db.stock.findMany({where:{status:'listed',industryId:{not:null}},select:{code:true,name:true,industry:{select:{name:true}}}}),quotes=await getStockQuotes(stocks.map(stock=>stock.code)),stockByCode=new Map(stocks.map(stock=>[stock.code,stock])),groups=new Map();for(const quote of quotes){const stock=stockByCode.get(quote.code),name=stock?.industry?.name;if(!name)continue;const group=groups.get(name)||{name,changes:[],stocks:[]};group.changes.push(Number(quote.change));group.stocks.push({code:quote.code,name:stock.name,price:quote.price,changePercent:quote.change});groups.set(name,group);}return[...groups.values()].map(group=>({name:group.name,changePercent:group.changes.reduce((sum,value)=>sum+value,0)/group.changes.length,stockCount:group.stocks.length,topStocks:group.stocks.sort((a,b)=>b.changePercent-a.changePercent).slice(0,5),source:'腾讯实时行情（当前入库股票行业聚合）'})).sort((a,b)=>b.changePercent-a.changePercent);}
 async function dashboardMetrics() {
-  const [indexes, breadth, industries] = await Promise.all([
+  const [indexes, breadth, providerIndustries] = await Promise.all([
     getMarketIndexes(), getMarketBreadth(), getIndustryRanking().catch(() => []),
   ]);
+  const industries=providerIndustries.length?providerIndustries:await realtimeIndustryRanking();
   return { indexes, breadth, industries: industries.slice(0, 10) };
 }
 
@@ -24,12 +26,20 @@ marketDashboardRouter.get('/market/dashboard', async (_req, res, next) => { try 
 
 marketDashboardRouter.get('/market/ai-summary', async (_req, res, next) => { try {
   const db=getPrisma(), metrics=await dashboardMetrics();
-  const indicators=await db.marketIndicator.findMany({take:100,orderBy:{observedAt:'desc'},include:{source:true}});
+  const [indicators,events,statements]=await Promise.all([db.marketIndicator.findMany({take:100,orderBy:{observedAt:'desc'},include:{source:true}}),db.majorFinancialEvent.findMany({take:30,orderBy:{publishedAt:'desc'}}),db.financialStatement.findMany({take:100,orderBy:{periodEnd:'desc'},select:{roe:true,netProfit:true,periodEnd:true}})]);
   const auditedAgent=marketAnalyst(indicators);
   const valid=metrics.breadth.totalCount||0, up=metrics.breadth.upCount||0, down=metrics.breadth.downCount||0;
   const indexEvidence=metrics.indexes.map(x=>({code:x.code,name:x.name,price:x.price,changePercent:x.change}));
   const summary=valid ? `沪深统计覆盖 ${valid} 只有效行情，上涨 ${up}、下跌 ${down}、平盘 ${metrics.breadth.flatCount||0}；市场广度${up>down?'偏强':up<down?'偏弱':'均衡'}。` : '实时市场广度不可用，不生成方向性结论。';
-  res.json({success:true,data:{summary,metrics:{advance:up,decline:down,flat:metrics.breadth.flatCount||0,coverage:valid},auditedAgents:[auditedAgent],evidence:{indexes:indexEvidence,breadth:{status:metrics.breadth.status,source:metrics.breadth.source,verifiedAgainst:metrics.breadth.verifiedAgainst,tradingDay:metrics.breadth.tradingDay},topIndustries:metrics.industries.slice(0,5)},risks:[disclosure]},meta:{mock:false,updatedAt:new Date()}});
+  const avgRoe=statements.map(row=>asNumber(row.roe)).filter(Number.isFinite),negativeEvents=events.filter(event=>/战争|制裁|关税|风险|下调|冲突|war|sanction|tariff|risk/i.test(`${event.title} ${event.summary||''}`));
+  const agents=[
+    {role:'market',name:'市场 Agent',view:`${summary} 主要指数平均涨跌 ${indexEvidence.length?(indexEvidence.reduce((sum,item)=>sum+(item.changePercent||0),0)/indexEvidence.length).toFixed(2):'—'}%。`,evidence:indexEvidence},
+    {role:'fundamental',name:'基本面 Agent',view:avgRoe.length?`最新财务样本 ${avgRoe.length} 条，平均 ROE ${ (avgRoe.reduce((a,b)=>a+b,0)/avgRoe.length).toFixed(2)}%；该样本仅代表已入库公司。`:'当前没有足够的最新财务样本，不形成方向性结论。',evidence:statements.slice(0,10)},
+    {role:'news',name:'新闻 Agent',view:`纳入 ${events.length} 条最新重大财经事件，其中规则识别风险事件 ${negativeEvents.length} 条。`,evidence:events.slice(0,10).map(event=>({title:event.title,category:event.category,url:event.articleUrl,publishedAt:event.publishedAt}))},
+    {role:'risk',name:'风险 Agent',view:`市场下跌家数 ${down}，风险事件 ${negativeEvents.length}；${down>up||negativeEvents.length>10?'风险偏高，控制集中度并核验事件影响':'未触发高风险阈值，但仍需关注数据源降级与盘中波动'}。`,evidence:[{breadth:metrics.breadth.status,up,down},{negativeEvents:negativeEvents.length}]}
+  ];
+  const conclusion=down>up||negativeEvents.length>10?'投委会结论：保持谨慎，优先控制仓位与集中度，不因单一涨幅追高。':'投委会结论：市场环境相对积极，但仅对证据完整标的继续深研，不作无依据推荐。';
+  res.json({success:true,data:{summary,agents,auditedAgents:[auditedAgent],investmentCommittee:{conclusion,confidence:valid?Math.min(.85,.5+Math.abs(up-down)/Math.max(valid,1)):.3},finalConclusion:conclusion,metrics:{advance:up,decline:down,flat:metrics.breadth.flatCount||0,coverage:valid},evidence:{indexes:indexEvidence,breadth:{status:metrics.breadth.status,source:metrics.breadth.source,verifiedAgainst:metrics.breadth.verifiedAgainst,tradingDay:metrics.breadth.tradingDay},topIndustries:metrics.industries.slice(0,5)},risks:[disclosure]},meta:{mock:false,updatedAt:new Date()}});
 } catch(error){next(error);} });
 
 function scoreStock(stock) {

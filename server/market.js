@@ -571,6 +571,16 @@ function toSinaCode(code) {
   return `sz${c}`;
 }
 
+export async function getStockQuotes(codes=[]) {
+  const normalized=[...new Set(codes.map(code=>String(code).replace(/\D/g,'').padStart(6,'0')).filter(code=>/^\d{6}$/.test(code)))];
+  if(!normalized.length)return [];
+  const requested=normalized.map(toTencentCode),out=[];
+  for(let i=0;i<requested.length;i+=80){
+    try{const data=await fetchTencent(requested.slice(i,i+80));for(const line of data.split('\n').filter(value=>value.includes('='))){const stock=parseTencentStock(line);if(stock?.name&&stock.price>0)out.push(stock);}}catch{/* 调用方负责显示覆盖不足 */}
+  }
+  return out;
+}
+
 export async function getStockQuote(code) {
   const tc = toTencentCode(code);
   let stock = null;
@@ -598,6 +608,8 @@ export async function getStockQuote(code) {
     } catch { /* ignore */ }
   }
   if (!stock) return null;
+  if(!Number.isFinite(stock.change)&&stock.yestClose>0)stock.change=(stock.price/stock.yestClose-1)*100;
+  if(!Number.isFinite(stock.changeAmount)&&stock.yestClose>0)stock.changeAmount=stock.price-stock.yestClose;
 
   // best-effort：用 Tushare daily_basic 补充更权威的 PE/PB（未配置 token 或失败则沿用腾讯值）
   if (tushare.isConfigured) {

@@ -9,6 +9,7 @@ import { runTradingWorkflow } from './agents/trading-workflow.js';
 import { fetchPriceHistory } from './adapters/eastmoney.js';
 import { TushareProvider } from './providers/tushare.js';
 import { collectMajorEvents, listMajorEvents } from './events/collector.js';
+import { getStockQuote, getStockQuotes } from '../market.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -16,12 +17,12 @@ const meta = (source = '东方财富') => ({ source, updatedAt: new Date().toISO
 
 financeRouter.get('/stocks', async (req, res, next) => { try {
   const db=getPrisma(), page=integer(req.query.page,1), size=integer(req.query.size || req.query.limit,20,100), where=req.query.q ? { OR:[{code:{contains:String(req.query.q)}},{name:{contains:String(req.query.q)}}] } : {};
-  const [items,total]=await Promise.all([db.stock.findMany({where,skip:(page-1)*size,take:size,orderBy:{code:'asc'},include:{prices:{take:1,orderBy:{tradeDate:'desc'},include:{source:true}},industry:true}}),db.stock.count({where})]);
-  res.json({success:true,data:{items,total,page,size},meta:meta()});
+  const [items,total]=await Promise.all([db.stock.findMany({where,skip:(page-1)*size,take:size,orderBy:{code:'asc'},include:{prices:{take:1,orderBy:{tradeDate:'desc'},include:{source:true}},industry:true}}),db.stock.count({where})]),quotes=await getStockQuotes(items.map(item=>item.code)),byCode=new Map(quotes.map(quote=>[quote.code,quote]));
+  res.json({success:true,data:{items:items.map(item=>({...item,realtimeQuote:byCode.get(item.code)||null})),total,page,size},meta:{...meta('腾讯实时行情 + PostgreSQL证券主数据'),realtimeCovered:quotes.length}});
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code', async (req,res,next)=>{try{
-  const stock=await getPrisma().stock.findUnique({where:{code:cleanCode(req.params.code)},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); res.json({success:true,data:stock,meta:meta()});
+  const code=cleanCode(req.params.code),stock=await getPrisma().stock.findUnique({where:{code},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); const realtimeQuote=await getStockQuote(code);res.json({success:true,data:{...stock,realtimeQuote},meta:{...meta(realtimeQuote?'腾讯实时行情 + PostgreSQL':'PostgreSQL缓存行情'),realtime:!!realtimeQuote}});
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
