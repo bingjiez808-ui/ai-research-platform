@@ -1,0 +1,616 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Paper {
+  id                BigInt        @id @default(autoincrement())
+  canonicalKey      String        @unique @map("canonical_key")
+  title             String
+  abstract          String?
+  publicationDate   DateTime?     @map("publication_date") @db.Date
+  venue             String?
+  doi               String?       @unique
+  citationCount     Int           @default(0) @map("citation_count")
+  concepts          Json          @default("[]")
+  raw               Json          @default("{}")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  authors           PaperAuthor[]
+  topics            PaperTopic[]
+  outgoingCitations Citation[]    @relation("CitingPaper")
+  incomingCitations Citation[]    @relation("CitedPaper")
+
+  @@index([publicationDate])
+  @@index([citationCount(sort: Desc)])
+  @@map("papers")
+}
+
+model Author {
+  id            BigInt        @id @default(autoincrement())
+  canonicalKey  String        @unique @map("canonical_key")
+  name          String
+  affiliations  Json          @default("[]")
+  hIndex        Int?          @map("h_index")
+  worksCount    Int?          @map("works_count")
+  citationCount BigInt?       @map("citation_count")
+  raw           Json          @default("{}")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  papers        PaperAuthor[]
+
+  @@index([citationCount(sort: Desc)])
+  @@map("authors")
+}
+
+model Topic {
+  id           BigInt       @id @default(autoincrement())
+  canonicalKey String       @unique @map("canonical_key")
+  name         String
+  description  String?
+  raw          Json         @default("{}")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  papers       PaperTopic[]
+
+  @@map("topics")
+}
+
+model ModelArtifact {
+  id           BigInt    @id @default(autoincrement())
+  canonicalKey String    @unique @map("canonical_key")
+  name         String
+  authorName   String?   @map("author_name")
+  pipelineTag  String?   @map("pipeline_tag")
+  downloads    BigInt?
+  likes        Int?
+  tags         Json      @default("[]")
+  lastModified DateTime? @map("last_modified")
+  raw          Json      @default("{}")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("models")
+}
+
+model PaperAuthor {
+  paperId  BigInt @map("paper_id")
+  authorId BigInt @map("author_id")
+  position Int    @default(0)
+  paper    Paper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  author   Author @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@id([paperId, authorId])
+  @@map("paper_authors")
+}
+
+model PaperTopic {
+  paperId BigInt @map("paper_id")
+  topicId BigInt @map("topic_id")
+  score   Float?
+  paper   Paper  @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  topic   Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([paperId, topicId])
+  @@map("paper_topics")
+}
+
+model Citation {
+  citingPaperId BigInt   @map("citing_paper_id")
+  citedPaperId  BigInt   @map("cited_paper_id")
+  source        String
+  observedAt    DateTime @default(now()) @map("observed_at")
+  citingPaper   Paper    @relation("CitingPaper", fields: [citingPaperId], references: [id], onDelete: Cascade)
+  citedPaper    Paper    @relation("CitedPaper", fields: [citedPaperId], references: [id], onDelete: Cascade)
+
+  @@id([citingPaperId, citedPaperId, source])
+  @@index([citedPaperId])
+  @@map("citations")
+}
+
+model Provenance {
+  entityType  String   @map("entity_type")
+  entityId    BigInt   @map("entity_id")
+  provider    String
+  providerId  String   @map("provider_id")
+  sourceUrl   String?  @map("source_url")
+  fetchedAt   DateTime @default(now()) @map("fetched_at")
+  payloadHash String?  @map("payload_hash")
+
+  // Polymorphic reference: entityType + entityId identifies the owning table.
+  // Referential integrity is enforced by ingestion services because PostgreSQL
+  // cannot express a single foreign key to multiple entity tables.
+  @@id([entityType, provider, providerId])
+  @@index([entityType, entityId])
+  @@map("provenance")
+}
+
+model ResearchIngestionRun {
+  id         BigInt    @id @default(autoincrement())
+  provider   String
+  query      String?
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  status     String    @default("running")
+  records    Int       @default(0)
+  error      String?
+
+  @@index([provider, startedAt(sort: Desc)])
+  @@map("ingestion_runs")
+}
+
+model DataSource {
+  id         BigInt               @id @default(autoincrement())
+  key        String               @unique
+  name       String
+  baseUrl    String?              @map("base_url")
+  kind       String
+  enabled    Boolean              @default(true)
+  metadata   Json                 @default("{}")
+  createdAt  DateTime             @default(now()) @map("created_at")
+  updatedAt  DateTime             @updatedAt @map("updated_at")
+  prices     StockPrice[]
+  statements FinancialStatement[]
+  news       NewsArticle[]
+  reports    ResearchReport[]
+  indicators MarketIndicator[]
+  analyses   AIAnalysis[]
+  runs       IngestionRun[]
+  topListEntries DragonTigerEntry[]
+
+  @@map("finance_data_sources")
+}
+
+model Industry {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  level     Int      @default(1)
+  source    String
+  raw       Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  stocks    Stock[]
+
+  @@map("industries")
+}
+
+model Stock {
+  id         BigInt               @id @default(autoincrement())
+  code       String               @unique
+  name       String
+  market     String
+  exchange   String?
+  status     String               @default("listed")
+  listDate   DateTime?            @map("list_date") @db.Date
+  industryId BigInt?              @map("industry_id")
+  industry   Industry?            @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  raw        Json                 @default("{}")
+  createdAt  DateTime             @default(now()) @map("created_at")
+  updatedAt  DateTime             @updatedAt @map("updated_at")
+  prices     StockPrice[]
+  statements FinancialStatement[]
+  news       NewsArticle[]
+  reports    ResearchReport[]
+  analyses   AIAnalysis[]
+  eventImpacts EventImpact[]
+  topListEntries DragonTigerEntry[]
+  portfolioHoldings PortfolioHolding[]
+
+  @@index([market, status])
+  @@map("stocks")
+}
+
+model Portfolio {
+  id          BigInt   @id @default(autoincrement())
+  ownerKey    String   @map("owner_key")
+  name        String
+  currency    String   @default("CNY")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  holdings    PortfolioHolding[]
+  imports     PortfolioImport[]
+  snapshots   PortfolioSnapshot[]
+
+  @@index([ownerKey])
+  @@map("portfolios")
+}
+
+model PortfolioHolding {
+  id           BigInt   @id @default(autoincrement())
+  portfolioId  BigInt   @map("portfolio_id")
+  portfolio    Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  stockId      BigInt   @map("stock_id")
+  stock        Stock    @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  stockCode    String   @map("stock_code")
+  shares       Decimal  @db.Decimal(24,4)
+  costPrice    Decimal  @map("cost_price") @db.Decimal(20,4)
+  buyDate      DateTime? @map("buy_date") @db.Date
+  currentValue Decimal? @map("current_value") @db.Decimal(24,2)
+  weight       Decimal? @db.Decimal(10,6)
+  source       String   @default("manual")
+  raw          Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([portfolioId, stockId])
+  @@index([portfolioId])
+  @@map("portfolio_holdings")
+}
+
+model PortfolioImport {
+  id          BigInt   @id @default(autoincrement())
+  portfolioId BigInt   @map("portfolio_id")
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  importType  String   @map("import_type")
+  importUser  String   @map("import_user")
+  status      String   @default("pending")
+  fileName    String?  @map("file_name")
+  fileSize    Int?     @map("file_size")
+  mimeType    String?  @map("mime_type")
+  checksum    String?  @map("checksum")
+  sheetCount  Int      @default(0) @map("sheet_count")
+  rowsRead    Int      @default(0) @map("rows_read")
+  rowsWritten Int      @default(0) @map("rows_written")
+  validationResult Json @default("{}") @map("validation_result")
+  previewRows Json     @default("[]") @map("preview_rows")
+  result      Json     @default("{}")
+  error       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime? @map("expires_at")
+  confirmedAt DateTime? @map("confirmed_at")
+  finishedAt  DateTime? @map("finished_at")
+  snapshot    PortfolioSnapshot?
+
+  @@index([portfolioId, createdAt(sort: Desc)])
+  @@map("portfolio_imports")
+}
+
+model PortfolioSnapshot {
+  id              BigInt   @id @default(autoincrement())
+  portfolioId     BigInt   @map("portfolio_id")
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  importId        BigInt?  @unique @map("import_id")
+  import          PortfolioImport? @relation(fields: [importId], references: [id], onDelete: SetNull)
+  asOf            DateTime @default(now()) @map("as_of")
+  totalValue      Decimal  @default(0) @map("total_value") @db.Decimal(24,2)
+  totalCost       Decimal  @default(0) @map("total_cost") @db.Decimal(24,2)
+  pnl             Decimal  @default(0) @db.Decimal(24,2)
+  pnlPercent      Decimal  @default(0) @map("pnl_percent") @db.Decimal(12,6)
+  industryExposure Json   @default("[]") @map("industry_exposure")
+  concentrationRisk Json  @default("{}") @map("concentration_risk")
+  newsRisk        Json     @default("{}") @map("news_risk")
+  recommendations Json     @default("[]")
+  citations       Json     @default("[]")
+  agentRuns       Json     @default("[]") @map("agent_runs")
+  status          String   @default("pending")
+  error           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@index([portfolioId, asOf(sort: Desc)])
+  @@map("portfolio_snapshots")
+}
+
+model StockPrice {
+  id            BigInt     @id @default(autoincrement())
+  stockId       BigInt     @map("stock_id")
+  stock         Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  tradeDate     DateTime   @map("trade_date") @db.Date
+  interval      String     @default("1d")
+  open          Decimal?   @db.Decimal(20, 4)
+  high          Decimal?   @db.Decimal(20, 4)
+  low           Decimal?   @db.Decimal(20, 4)
+  close         Decimal    @db.Decimal(20, 4)
+  previousClose Decimal?   @map("previous_close") @db.Decimal(20, 4)
+  changePercent Decimal?   @map("change_percent") @db.Decimal(12, 4)
+  volume        BigInt?
+  turnover      Decimal?   @db.Decimal(24, 2)
+  turnoverRate  Decimal?   @map("turnover_rate") @db.Decimal(12, 4)
+  marketCap     Decimal?   @map("market_cap") @db.Decimal(24, 2)
+  pe            Decimal?   @db.Decimal(16, 4)
+  pb            Decimal?   @db.Decimal(16, 4)
+  sourceId      BigInt     @map("source_id")
+  source        DataSource @relation(fields: [sourceId], references: [id])
+  providerKey   String     @map("provider_key")
+  sourceUrl     String?    @map("source_url")
+  fetchedAt     DateTime   @default(now()) @map("fetched_at")
+  payloadHash   String     @map("payload_hash")
+  raw           Json       @default("{}")
+
+  @@unique([stockId, tradeDate, interval, sourceId])
+  @@index([tradeDate])
+  @@map("stock_prices")
+}
+
+model FinancialStatement {
+  id            BigInt     @id @default(autoincrement())
+  stockId       BigInt     @map("stock_id")
+  stock         Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  statementType String     @map("statement_type")
+  periodEnd     DateTime   @map("period_end") @db.Date
+  reportType    String?    @map("report_type")
+  currency      String     @default("CNY")
+  revenue       Decimal?   @db.Decimal(24, 2)
+  netProfit     Decimal?   @map("net_profit") @db.Decimal(24, 2)
+  totalAssets   Decimal?   @map("total_assets") @db.Decimal(24, 2)
+  totalEquity   Decimal?   @map("total_equity") @db.Decimal(24, 2)
+  totalLiabilities Decimal? @map("total_liabilities") @db.Decimal(24, 2)
+  roe           Decimal?   @db.Decimal(12, 4)
+  grossMargin   Decimal?   @map("gross_margin") @db.Decimal(12, 4)
+  operatingCashFlow Decimal? @map("operating_cash_flow") @db.Decimal(24, 2)
+  investingCashFlow Decimal? @map("investing_cash_flow") @db.Decimal(24, 2)
+  financingCashFlow Decimal? @map("financing_cash_flow") @db.Decimal(24, 2)
+  metrics       Json       @default("{}")
+  sourceId      BigInt     @map("source_id")
+  source        DataSource @relation(fields: [sourceId], references: [id])
+  providerKey   String     @map("provider_key")
+  sourceUrl     String?    @map("source_url")
+  fetchedAt     DateTime   @default(now()) @map("fetched_at")
+  payloadHash   String     @map("payload_hash")
+  raw           Json       @default("{}")
+
+  @@unique([stockId, statementType, periodEnd, sourceId])
+  @@map("financial_statements")
+}
+
+model NewsArticle {
+  id           BigInt     @id @default(autoincrement())
+  canonicalKey String     @unique @map("canonical_key")
+  stockId      BigInt?    @map("stock_id")
+  stock        Stock?     @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  title        String
+  summary      String?
+  content      String?
+  cleanedContent String?  @map("cleaned_content")
+  category     String?
+  publishedAt  DateTime   @map("published_at")
+  url          String?
+  sentiment    Decimal?   @db.Decimal(6, 4)
+  classification String?
+  embeddingModel String?  @map("embedding_model")
+  embedding    Unsupported("vector(1536)")?
+  sourceId     BigInt     @map("source_id")
+  source       DataSource @relation(fields: [sourceId], references: [id])
+  providerKey  String     @map("provider_key")
+  fetchedAt    DateTime   @default(now()) @map("fetched_at")
+  payloadHash  String     @map("payload_hash")
+  raw          Json       @default("{}")
+  clusterMembers NewsClusterMember[]
+  events       Event[]
+
+  @@index([publishedAt(sort: Desc)])
+  @@index([stockId, publishedAt(sort: Desc)])
+  @@map("news_articles")
+}
+
+model ResearchReport {
+  id           BigInt     @id @default(autoincrement())
+  canonicalKey String     @unique @map("canonical_key")
+  stockId      BigInt?    @map("stock_id")
+  stock        Stock?     @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  title        String
+  institution  String?
+  analyst      String?
+  rating       String?
+  targetPrice  Decimal?   @map("target_price") @db.Decimal(20, 4)
+  publishedAt  DateTime   @map("published_at")
+  url          String?
+  summary      String?
+  sourceId     BigInt     @map("source_id")
+  source       DataSource @relation(fields: [sourceId], references: [id])
+  providerKey  String     @map("provider_key")
+  fetchedAt    DateTime   @default(now()) @map("fetched_at")
+  payloadHash  String     @map("payload_hash")
+  raw          Json       @default("{}")
+
+  @@index([publishedAt(sort: Desc)])
+  @@map("research_reports")
+}
+
+model MarketIndicator {
+  id          BigInt     @id @default(autoincrement())
+  key         String
+  name        String
+  observedAt  DateTime   @map("observed_at")
+  value       Decimal    @db.Decimal(24, 6)
+  unit        String?
+  dimensions  Json       @default("{}")
+  sourceId    BigInt     @map("source_id")
+  source      DataSource @relation(fields: [sourceId], references: [id])
+  providerKey String     @map("provider_key")
+  sourceUrl   String?    @map("source_url")
+  fetchedAt   DateTime   @default(now()) @map("fetched_at")
+  payloadHash String     @map("payload_hash")
+  raw         Json       @default("{}")
+
+  @@unique([key, observedAt, sourceId])
+  @@index([observedAt(sort: Desc)])
+  @@map("market_indicators")
+}
+
+model AIAnalysis {
+  id        BigInt      @id @default(autoincrement())
+  stockId   BigInt?     @map("stock_id")
+  stock     Stock?      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  agent     String
+  method    String
+  version   String
+  asOf      DateTime    @map("as_of")
+  score     Decimal?    @db.Decimal(8, 4)
+  signal    String?
+  summary   String
+  evidence  Json        @default("[]")
+  risks     Json        @default("[]")
+  trace     Json        @default("[]")
+  confidence Decimal?   @db.Decimal(6, 4)
+  model     String?
+  inputTokens Int       @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  costUsd   Decimal     @default(0) @map("cost_usd") @db.Decimal(14, 8)
+  sourceId  BigInt?     @map("source_id")
+  source    DataSource? @relation(fields: [sourceId], references: [id])
+  createdAt DateTime    @default(now()) @map("created_at")
+  citations AnalysisCitation[]
+
+  @@index([stockId, agent, asOf(sort: Desc)])
+  @@map("ai_analyses")
+}
+
+model AnalysisCitation {
+  id         BigInt     @id @default(autoincrement())
+  analysisId BigInt     @map("analysis_id")
+  analysis   AIAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  sourceType String     @map("source_type")
+  sourceId   String     @map("source_id")
+  title      String?
+  url        String?
+  quotedData Json       @default("{}") @map("quoted_data")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@index([analysisId])
+  @@map("analysis_citations")
+}
+
+model NewsCluster {
+  id          BigInt   @id @default(autoincrement())
+  clusterKey  String   @unique @map("cluster_key")
+  label       String
+  keywords    Json     @default("[]")
+  articleCount Int     @default(0) @map("article_count")
+  sentiment   Decimal? @db.Decimal(6, 4)
+  firstSeenAt DateTime @map("first_seen_at")
+  lastSeenAt  DateTime @map("last_seen_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  members     NewsClusterMember[]
+
+  @@index([lastSeenAt(sort: Desc)])
+  @@map("news_clusters")
+}
+
+model NewsClusterMember {
+  clusterId BigInt @map("cluster_id")
+  articleId BigInt @map("article_id")
+  similarity Decimal? @db.Decimal(6, 4)
+  cluster NewsCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  article NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([clusterId, articleId])
+  @@map("news_cluster_members")
+}
+
+model Event {
+  id          BigInt      @id @default(autoincrement())
+  eventKey    String      @unique @map("event_key")
+  articleId   BigInt?     @map("article_id")
+  article     NewsArticle? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  eventType   String      @map("event_type")
+  title       String
+  occurredAt  DateTime    @map("occurred_at")
+  entities    Json        @default("[]")
+  industries  Json        @default("[]")
+  sentiment   Decimal?    @db.Decimal(6, 4)
+  confidence  Decimal?    @db.Decimal(6, 4)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  impacts     EventImpact[]
+
+  @@index([occurredAt(sort: Desc)])
+  @@map("events")
+}
+
+model EventImpact {
+  id            BigInt   @id @default(autoincrement())
+  eventId       BigInt   @map("event_id")
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  stockId       BigInt   @map("stock_id")
+  stock         Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  window        String
+  prePrice      Decimal? @map("pre_price") @db.Decimal(20, 4)
+  postPrice     Decimal? @map("post_price") @db.Decimal(20, 4)
+  benchmarkReturn Decimal? @map("benchmark_return") @db.Decimal(12, 6)
+  stockReturn   Decimal? @map("stock_return") @db.Decimal(12, 6)
+  abnormalReturn Decimal? @map("abnormal_return") @db.Decimal(12, 6)
+  impactScore   Decimal  @map("impact_score") @db.Decimal(8, 4)
+  confidence    Decimal  @db.Decimal(6, 4)
+  method        String
+  evidence      Json     @default("[]")
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  @@unique([eventId, stockId, window])
+  @@index([stockId, calculatedAt(sort: Desc)])
+  @@map("event_impacts")
+}
+
+model JobExecution {
+  id          BigInt   @id @default(autoincrement())
+  jobName     String   @map("job_name")
+  scheduledAt DateTime @map("scheduled_at")
+  startedAt   DateTime @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  status      String   @default("running")
+  attempt     Int      @default(1)
+  lockKey     String   @map("lock_key")
+  result      Json     @default("{}")
+  error       String?
+
+  @@index([jobName, startedAt(sort: Desc)])
+  @@map("job_executions")
+}
+
+model ProviderCache {
+  id          BigInt   @id @default(autoincrement())
+  provider    String
+  cacheKey    String   @map("cache_key")
+  payload     Json
+  fetchedAt   DateTime @default(now()) @map("fetched_at")
+  expiresAt   DateTime @map("expires_at")
+  staleUntil  DateTime @map("stale_until")
+  status      String   @default("fresh")
+  error       String?
+  hitCount    Int      @default(0) @map("hit_count")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, cacheKey])
+  @@index([expiresAt])
+  @@map("provider_cache")
+}
+
+model DragonTigerEntry {
+  id           BigInt     @id @default(autoincrement())
+  stockId      BigInt?    @map("stock_id")
+  stock        Stock?     @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  tradeDate    DateTime   @map("trade_date") @db.Date
+  reason       String?
+  close        Decimal?   @db.Decimal(20,4)
+  changePercent Decimal?  @map("change_percent") @db.Decimal(12,4)
+  turnoverRate Decimal?   @map("turnover_rate") @db.Decimal(12,4)
+  amount       Decimal?   @db.Decimal(24,2)
+  netAmount    Decimal?   @map("net_amount") @db.Decimal(24,2)
+  sourceId     BigInt     @map("source_id")
+  source       DataSource @relation(fields: [sourceId], references: [id])
+  providerKey  String     @map("provider_key")
+  fetchedAt    DateTime   @default(now()) @map("fetched_at")
+  raw          Json       @default("{}")
+
+  @@unique([tradeDate, providerKey, sourceId])
+  @@index([tradeDate(sort: Desc)])
+  @@map("dragon_tiger_entries")
+}
+
+model IngestionRun {
+  id             BigInt      @id @default(autoincrement())
+  job            String
+  provider       String
+  sourceId       BigInt?     @map("source_id")
+  source         DataSource? @relation(fields: [sourceId], references: [id])
+  startedAt      DateTime    @default(now()) @map("started_at")
+  finishedAt     DateTime?   @map("finished_at")
+  status         String      @default("running")
+  recordsRead    Int         @default(0) @map("records_read")
+  recordsWritten Int         @default(0) @map("records_written")
+  anomalies      Json        @default("[]")
+  error          String?
+  metadata       Json        @default("{}")
+
+  @@index([job, startedAt(sort: Desc)])
+  @@map("finance_ingestion_runs")
+}

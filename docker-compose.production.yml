@@ -1,0 +1,27 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      SCHEDULER_ENABLED: "false"
+      AKSHARE_WORKER_URL: http://akshare-worker:8000
+    ports: ["3001:3001"]
+    depends_on:
+      akshare-worker: { condition: service_healthy }
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: ["node", "--env-file-if-exists=.env", "scripts/scheduler-daemon.js"]
+    env_file: .env
+    environment:
+      SCHEDULER_ENABLED: "true"
+      AKSHARE_WORKER_URL: http://akshare-worker:8000
+    depends_on:
+      akshare-worker: { condition: service_healthy }
+    restart: unless-stopped
+
+  akshare-worker:
+    build: workers/akshare
+    expose: ["8000"]
+    restart: unless-stopped
