@@ -25,6 +25,8 @@ async function request(path,{method='GET',params,body,signal,owner=false}={}) {
 export const api={
   stocks:(params,signal)=>request('/stocks',{params,signal}),
   stock:(code,signal)=>request(`/stocks/${encodeURIComponent(code)}`,{signal}),
+  priceHistory:(code,params,signal)=>request(`/stocks/${encodeURIComponent(code)}/price-history`,{params,signal}),
+  decision:(code,signal)=>request(`/decision/${encodeURIComponent(code)}`,{signal}),
   trend:(params,signal)=>request('/market/trend',{params,signal}),
   news:(params,signal)=>request('/news',{params,signal}),
   analysis:(code,signal)=>request(`/analysis/${encodeURIComponent(code)}`,{signal}),

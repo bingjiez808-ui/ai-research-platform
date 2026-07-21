@@ -45,3 +45,15 @@ Citation edges are imported from Semantic Scholar references when the referenced
 ```sh
 npm run dev
 ```
+
+## A-share decision workflow
+
+- `GET /api/stocks/:code/price-history?limit=120` returns verified Eastmoney forward-adjusted daily OHLCV data with no mock fallback.
+- `GET /api/decision/:code` runs the auditable Research, Market and Risk analysts, a bounded Bull/Bear evidence review, and a deterministic investment-committee guard.
+- Directional suggestions are suppressed when evidence confidence or historical coverage is insufficient.
+
+The role separation and bounded debate are inspired by
+[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents),
+licensed under Apache-2.0. This project does not copy its Python implementation,
+prompts, data providers, or automatic-trading behavior; the workflow is an
+independent Node.js implementation adapted for A-share evidence and risk rules.

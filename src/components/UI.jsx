@@ -43,3 +43,15 @@ export function Sparkline({ values = [], positive = true }) {
   const points = clean.map((v, i) => `${(i / (clean.length - 1)) * 100},${38 - ((v - min) / spread) * 34}`).join(' ');
   return <svg className={`spark ${positive ? 'positive' : 'negative'}`} viewBox="0 0 100 42" preserveAspectRatio="none" aria-label="Price trend"><line x1="0" y1="38" x2="100" y2="38"/><polyline points={points}/></svg>;
 }
+
+export function PriceTrendChart({ items = [] }) {
+  const rows = items.filter(item => Number.isFinite(Number(item.close)));
+  if (rows.length < 2) return <div className="chart-empty">暂无足够的真实历史行情</div>;
+  const width=900,height=280,pad=30, values=rows.map(item=>Number(item.close));
+  const min=Math.min(...values),max=Math.max(...values),spread=max-min||1;
+  const x=index=>pad+(index/(rows.length-1))*(width-pad*2), y=value=>height-pad-((value-min)/spread)*(height-pad*2);
+  const line=rows.map((item,index)=>`${index?'L':'M'}${x(index).toFixed(1)},${y(Number(item.close)).toFixed(1)}`).join(' ');
+  const area=`${line} L${x(rows.length-1)},${height-pad} L${x(0)},${height-pad} Z`;
+  const positive=values.at(-1)>=values[0];
+  return <div className={`price-chart ${positive?'positive':'negative'}`}><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="真实股价历史趋势图"><defs><linearGradient id="priceArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".28"/><stop offset="1" stopColor="currentColor" stopOpacity="0"/></linearGradient></defs><path className="area" d={area}/><path className="line" d={line}/></svg><div className="chart-axis"><span>{rows[0].tradeDate}</span><b>{min.toFixed(2)} — {max.toFixed(2)}</b><span>{rows.at(-1).tradeDate}</span></div></div>;
+}
