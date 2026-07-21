@@ -155,6 +155,13 @@ async function fetchSina(codes) {
   return gbkDecoder.decode(res.data);
 }
 
+export async function getTencentPriceHistory(code, limit=320) {
+  const symbol=`${String(code).startsWith('6')?'sh':'sz'}${code}`;
+  const {data}=await tencentApi.get('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',{params:{param:`${symbol},day,,,${Math.min(640,Math.max(30,limit))},qfq`}});
+  const node=data?.data?.[symbol]||{},rows=node.qfqday||node.day||[];
+  return rows.map(row=>({tradeDate:row[0],open:Number(row[1]),close:Number(row[2]),high:Number(row[3]),low:Number(row[4]),volume:Number(row[5]),turnover:row[6]==null?null:Number(row[6]),changePercent:row[8]==null?null:Number(row[8]),raw:row})).filter(row=>row.tradeDate&&Number.isFinite(row.close));
+}
+
 // ==================== 市场概览 ====================
 
 export async function getMarketIndexes() {

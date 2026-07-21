@@ -9,7 +9,7 @@ import { runTradingWorkflow } from './agents/trading-workflow.js';
 import { fetchPriceHistory } from './adapters/eastmoney.js';
 import { TushareProvider } from './providers/tushare.js';
 import { collectMajorEvents, listMajorEvents } from './events/collector.js';
-import { getStockQuote, getStockQuotes } from '../market.js';
+import { getStockQuote, getStockQuotes, getTencentPriceHistory } from '../market.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -36,12 +36,17 @@ financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
   }catch(error){
     liveError=error.message;
     try{
+      items=(await getTencentPriceHistory(code,limit)).slice(-limit);if(items.length<2)throw new Error('Tencent returned insufficient history');
+      const source=await db.dataSource.upsert({where:{key:'tencent'},create:{key:'tencent',name:'腾讯财经',kind:'market-data',baseUrl:'https://gu.qq.com/'},update:{enabled:true}});
+      await db.stockPrice.createMany({skipDuplicates:true,data:items.map(item=>({stockId:stock.id,tradeDate:new Date(`${item.tradeDate}T00:00:00.000Z`),interval:'1d',open:item.open,close:item.close,high:item.high,low:item.low,changePercent:item.changePercent,volume:BigInt(Math.trunc(item.volume||0)),turnover:item.turnover,sourceId:source.id,providerKey:`${code}:${item.tradeDate}`,sourceUrl:`https://gu.qq.com/${code.startsWith('6')?'sh':'sz'}${code}`,payloadHash:createHash('sha256').update(JSON.stringify(item.raw)).digest('hex'),raw:{kline:item.raw,adjustment:'forward'}}))});
+      sourceName='腾讯历史日线行情（前复权）';liveError=null;
+    }catch(tencentError){try{
       const end=new Date().toISOString().slice(0,10).replaceAll('-',''),start=new Date(Date.now()-730*86400000).toISOString().slice(0,10).replaceAll('-',''),rows=await new TushareProvider().dailyQuotes({ts_code:`${code}.${code.startsWith('6')?'SH':'SZ'}`,start_date:start,end_date:end});
       items=rows.slice(0,limit).reverse().map(row=>({tradeDate:`${row.trade_date.slice(0,4)}-${row.trade_date.slice(4,6)}-${row.trade_date.slice(6,8)}`,open:Number(row.open),close:Number(row.close),high:Number(row.high),low:Number(row.low),volume:Number(row.vol)*100,turnover:Number(row.amount)*1000,changePercent:Number(row.pct_chg),change:Number(row.change),raw:row}));
       const source=await db.dataSource.upsert({where:{key:'tushare'},create:{key:'tushare',name:'Tushare',kind:'market-data',baseUrl:'https://tushare.pro/'},update:{enabled:true}});
       await db.stockPrice.createMany({skipDuplicates:true,data:items.map(item=>({stockId:stock.id,tradeDate:new Date(`${item.tradeDate}T00:00:00.000Z`),interval:'1d',open:item.open,close:item.close,high:item.high,low:item.low,changePercent:item.changePercent,volume:BigInt(Math.trunc(item.volume)),turnover:item.turnover,sourceId:source.id,providerKey:`${code}:${item.tradeDate}`,sourceUrl:'https://tushare.pro/document/2?doc_id=27',payloadHash:createHash('sha256').update(JSON.stringify(item.raw)).digest('hex'),raw:{...item.raw,adjustment:'none'}}))});
       sourceName='Tushare 历史日线行情（未复权）';liveError=null;
-    }catch(fallbackError){liveError=`Eastmoney: ${error.message}; Tushare: ${fallbackError.message}`;}
+    }catch(fallbackError){liveError=`Eastmoney: ${error.message}; Tencent: ${tencentError.message}; Tushare: ${fallbackError.message}`;}}
   }
   if(!items.length){const cached=await db.stockPrice.findMany({where:{stockId:stock.id,interval:'1d'},take:limit,orderBy:{tradeDate:'desc'},include:{source:true}});items=cached.reverse().map(item=>({tradeDate:item.tradeDate.toISOString().slice(0,10),open:Number(item.open),close:Number(item.close),high:Number(item.high),low:Number(item.low),volume:Number(item.volume),turnover:Number(item.turnover),changePercent:Number(item.changePercent)}));}
   if(items.length<2)throw Object.assign(new Error(liveError||'Insufficient verified price history'),{status:502,code:'PRICE_HISTORY_UNAVAILABLE'});
