@@ -15,7 +15,7 @@ async function dashboardMetrics() {
   const [indexes, breadth, providerIndustries] = await Promise.all([
     getMarketIndexes(), getMarketBreadth(), getIndustryRanking().catch(() => []),
   ]);
-  const industries=providerIndustries.length?providerIndustries:await realtimeIndustryRanking();
+  const industries=providerIndustries.length?providerIndustries:process.env.DATABASE_URL?await realtimeIndustryRanking():[];
   return { indexes, breadth, industries: industries.slice(0, 10) };
 }
 
