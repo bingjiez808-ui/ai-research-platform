@@ -5,6 +5,7 @@ import { getIndustryRanking } from '../eastmoney.js';
 import { marketAnalyst, stockResearch } from './agents/index.js';
 import { analyzePortfolio, ownerKey } from './portfolio/service.js';
 import { scanLiveMarket } from './live-market-scan.js';
+import { getHotSectorRecommendations } from './hot-sectors.js';
 
 export const marketDashboardRouter = Router();
 const asNumber = value => value == null ? null : Number(value);
@@ -24,6 +25,8 @@ marketDashboardRouter.get('/market/dashboard', async (_req, res, next) => { try 
   const data = await dashboardMetrics();
   res.json({ success:true, data, meta:{ sources:['腾讯实时行情','Tushare上市全集（配置时）','东方财富行业'], mock:false, updatedAt:new Date(), breadthStatus:data.breadth.status } });
 } catch (error) { next(error); } });
+
+marketDashboardRouter.get('/market/hot-sectors',async(_req,res,next)=>{try{const data=await getHotSectorRecommendations();res.json({success:true,data,meta:{source:['新浪财经 7×24','财联社免费电报','巨潮公告','PostgreSQL关联A股行情'],status:data.items.some(item=>item.score!=null)?'live':'insufficient-evidence',mock:false,updatedAt:data.asOf,coverage:data.coverage}});}catch(error){next(error);}});
 
 marketDashboardRouter.get('/market/ai-summary', async (_req, res, next) => { try {
   const metrics=await dashboardMetrics(),db=process.env.DATABASE_URL?getPrisma():null;

@@ -35,6 +35,7 @@ export const api={
   marketDashboard:signal=>request('/market/dashboard',{signal}),
   marketSummary:signal=>request('/market/ai-summary',{signal}),
   marketTop10:signal=>request('/market/recommendations/top10',{signal}),
+  hotSectors:signal=>request('/market/hot-sectors',{signal}),
   dailySummary:signal=>request('/daily-summary/today',{signal,owner:true}),
   marketScreener:(params,signal)=>request('/market/scans/technical',{params,signal}),
   majorEvents:signal=>request('/events/major',{signal}),

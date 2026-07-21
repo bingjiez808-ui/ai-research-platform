@@ -31,14 +31,17 @@ function LoginRequired({onLogin}){return <div className="login-required glass"><
 function CommandCenter({portfolioId,goPortfolio,onAsk,onStock}){
   const commandResult=useApi(signal=>api.commandCenter(portfolioId,signal),[portfolioId]);
   const agentLatest=useApi(signal=>api.dailyAgentLatest(signal),[]),majorEvents=useApi(signal=>api.majorEvents(signal),[]);
-  const dashboard=useApi(signal=>api.marketDashboard(signal),[]),summaryResult=useApi(signal=>api.marketSummary(signal),[]),topResult=useApi(signal=>api.marketTop10(signal),[]),screener=useApi(signal=>api.marketScreener({},signal),[]);
+  const dashboardRequest=useApi(signal=>api.marketDashboard(signal),[]),summaryResult=useApi(signal=>api.marketSummary(signal),[]),topResult=useApi(signal=>api.marketTop10(signal),[]),hotSectors=useApi(signal=>api.hotSectors(signal),[]),screener=useApi(signal=>api.marketScreener({},signal),[]);
+  // The four dashboard panels are independent. A slow market snapshot must not
+  // hide already completed summary, ranking, sector and technical responses.
+  const dashboard={...dashboardRequest,loading:false,error:null};
   // Command-center is only one of several independent home-page sources. Its
   // latency or failure must not hide already completed market/agent responses.
   const result={...commandResult,loading:false,error:null};
   const d=commandResult.data?.data||{marketSummary:{summary:commandResult.loading?'首页概览正在生成，其余实时数据会分区补全。':commandResult.error?`首页概览暂不可用：${commandResult.error.message}`:'暂无可验证市场摘要',signal:'观察',evidence:[]},dailyBrief:{items:[],generatedAt:null},hotEvents:[]};
   const market=d?.marketSummary||{},risk=d?.portfolioRisk,events=d?.hotEvents||[],brief=d?.dailyBrief?.items||[];
-  const md=dashboard.data?.data||{},scan=screener.data?.data||{},summaryData=summaryResult.data?.data||{},topData=topResult.data?.data||{};
-  const breadth=md.breadth||{},indices=md.indexes||[],top=topData.items||topData.recommendations||topData.top10||[],industries=md.industries||[],summary=summaryData.summary;
+  const md=dashboard.data?.data||{},scan=screener.data?.data||{},summaryData=summaryResult.data?.data||{},topData=topResult.data?.data||{},sectorData=hotSectors.data?.data||{};
+  const breadth=md.breadth||{},indices=md.indexes||[],top=topData.items||topData.recommendations||topData.top10||[],industries=(sectorData.items||md.industries||[]).map(x=>x.metrics?{...x,name:`${x.name} · 热度 ${x.score??'证据不足'}`,changePercent:x.metrics.averageChange,stockCount:x.metrics.linkedStocks,topStocks:x.leaders}:x),summary=summaryData.summary;
   const indexCards=['上证指数','深证成指','创业板指'].map((name,i)=>indices.find(x=>x.name?.includes(name.slice(0,2)))||indices[i]||{name});
   const scanGroups=[['涨幅 3–5%',scan.categories?.up3to5],['MACD 金叉',scan.categories?.macdGoldenCross],['红三兵 / 三武士',scan.categories?.threeWhiteSoldiers]];
   const latest=agentLatest.data?.data,latestReports=latest?.reports||[],major=envelope(majorEvents.data,['items','events']).items;
