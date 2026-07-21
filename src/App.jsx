@@ -29,10 +29,13 @@ function AuthDialog({open,onClose,onSuccess}){const[mode,setMode]=useState('logi
 function LoginRequired({onLogin}){return <div className="login-required glass"><i>◇</i><h2>登录后使用个人投研</h2><p>公共行情无需登录；自选股和投资组合仅对当前账户可见。</p><button className="primary" onClick={onLogin}>登录 / 注册</button></div>}
 
 function CommandCenter({portfolioId,goPortfolio,onAsk,onStock}){
-  const result=useApi(signal=>api.commandCenter(portfolioId,signal),[portfolioId]);
+  const commandResult=useApi(signal=>api.commandCenter(portfolioId,signal),[portfolioId]);
   const agentLatest=useApi(signal=>api.dailyAgentLatest(signal),[]),majorEvents=useApi(signal=>api.majorEvents(signal),[]);
   const dashboard=useApi(signal=>api.marketDashboard(signal),[]),summaryResult=useApi(signal=>api.marketSummary(signal),[]),topResult=useApi(signal=>api.marketTop10(signal),[]),screener=useApi(signal=>api.marketScreener({},signal),[]);
-  const d=result.data?.data;
+  // Command-center is only one of several independent home-page sources. Its
+  // latency or failure must not hide already completed market/agent responses.
+  const result={...commandResult,loading:false,error:null};
+  const d=commandResult.data?.data||{marketSummary:{summary:commandResult.loading?'首页概览正在生成，其余实时数据会分区补全。':commandResult.error?`首页概览暂不可用：${commandResult.error.message}`:'暂无可验证市场摘要',signal:'观察',evidence:[]},dailyBrief:{items:[],generatedAt:null},hotEvents:[]};
   const market=d?.marketSummary||{},risk=d?.portfolioRisk,events=d?.hotEvents||[],brief=d?.dailyBrief?.items||[];
   const md=dashboard.data?.data||{},scan=screener.data?.data||{},summaryData=summaryResult.data?.data||{},topData=topResult.data?.data||{};
   const breadth=md.breadth||{},indices=md.indexes||[],top=topData.items||topData.recommendations||topData.top10||[],industries=md.industries||[],summary=summaryData.summary;
