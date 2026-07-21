@@ -25,8 +25,8 @@ marketDashboardRouter.get('/market/dashboard', async (_req, res, next) => { try 
 } catch (error) { next(error); } });
 
 marketDashboardRouter.get('/market/ai-summary', async (_req, res, next) => { try {
-  const db=getPrisma(), metrics=await dashboardMetrics();
-  const [indicators,events,statements]=await Promise.all([db.marketIndicator.findMany({take:100,orderBy:{observedAt:'desc'},include:{source:true}}),db.majorFinancialEvent.findMany({take:30,orderBy:{publishedAt:'desc'}}),db.financialStatement.findMany({take:100,orderBy:{periodEnd:'desc'},select:{roe:true,netProfit:true,periodEnd:true}})]);
+  const metrics=await dashboardMetrics(),db=process.env.DATABASE_URL?getPrisma():null;
+  const [indicators,events,statements]=db?await Promise.all([db.marketIndicator.findMany({take:100,orderBy:{observedAt:'desc'},include:{source:true}}),db.majorFinancialEvent.findMany({take:30,orderBy:{publishedAt:'desc'}}),db.financialStatement.findMany({take:100,orderBy:{periodEnd:'desc'},select:{roe:true,netProfit:true,periodEnd:true}})]):[[],[],[]];
   const auditedAgent=marketAnalyst(indicators);
   const valid=metrics.breadth.totalCount||0, up=metrics.breadth.upCount||0, down=metrics.breadth.downCount||0;
   const indexEvidence=metrics.indexes.map(x=>({code:x.code,name:x.name,price:x.price,changePercent:x.change}));
@@ -66,6 +66,7 @@ function scoreStock(stock) {
 }
 
 marketDashboardRouter.get('/market/recommendations/top10', async (_req,res,next)=>{try{
+  if(!process.env.DATABASE_URL)return res.json({success:true,data:{method:{id:'trading-agents-role-debate-v2',roles:['market-agent','fundamentals-agent','news-agent','risk-agent'],minimumEvidence:'需连接数据库后扫描行情、财务与新闻证据'},items:[],coverage:{candidatesScored:0,evidenceEligible:0,returned:0,insufficientEvidence:0},disclosure},meta:{source:'无数据库预览模式',status:'insufficient-evidence',mock:false,fetchedAt:new Date()}});
   const stocks=await getPrisma().stock.findMany({where:{status:'listed',prices:{some:{interval:'1d'}}},include:{industry:true,prices:{where:{interval:'1d'},take:60,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:4,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}});
   const scored=stocks.map(scoreStock),eligible=scored.filter(x=>x.evidenceSufficient&&x.totalScore!=null).sort((a,b)=>b.totalScore-a.totalScore),items=eligible.slice(0,10);
   res.json({success:true,data:{method:{id:'trading-agents-role-debate-v2',roles:['market-agent','fundamentals-agent','news-agent','risk-agent','research-debate-agent'],aggregation:'四个专业角色可用分数均值 × 证据完整度；研究/辩论角色复核观点',minimumEvidence:'至少3/4专业角色、20条日线、4条可引用证据；不足不进入Top10',candidateUniverse:'数据库 status=listed 且有真实日线'},items,coverage:{candidatesScored:stocks.length,evidenceEligible:eligible.length,returned:items.length,insufficientEvidence:scored.length-eligible.length},disclosure},meta:{source:'PostgreSQL audited market/financial/news data',status:items.length?'live':'insufficient-evidence',mock:false,fetchedAt:new Date(),dataAsOf:items.reduce((latest,x)=>!latest||new Date(x.asOf)>new Date(latest)?x.asOf:latest,null)}});
@@ -81,6 +82,7 @@ function signals(stock) {
 }
 
 marketDashboardRouter.get('/market/scans/technical', async(req,res,next)=>{try{
+  if(!process.env.DATABASE_URL)return res.json({success:true,data:{categories:{up3to5:[],macdGoldenCross:[],threeWhiteSoldiers:[]},coverage:{universe:'需连接数据库后扫描',listed:0,withDailyHistory:0,macdEligible:0,threeDayEligible:0,notCovered:0,note:'当前为无数据库预览模式'},definitions:{up3to5:'最新日涨幅闭区间[3%,5%]',macdGoldenCross:'当日DIF上穿DEA，EMA(12,26,9)',threeWhiteSoldiers:'连续三根阳线且收盘价逐日抬高'}},meta:{mock:false,status:'preview',updatedAt:new Date()}});
   const db=getPrisma(),limit=Math.min(100,Math.max(1,Number(req.query.limit)||30));
   const [listed,stocks]=await Promise.all([db.stock.count({where:{status:'listed'}}),db.stock.findMany({where:{status:'listed',prices:{some:{interval:'1d'}}},include:{prices:{where:{interval:'1d'},take:60,orderBy:{tradeDate:'desc'},include:{source:true}}}})]);
   const all=stocks.flatMap(signals), grouped={up3to5:all.filter(x=>x.type==='up_3_5').slice(0,limit),macdGoldenCross:all.filter(x=>x.type==='macd_golden_cross').slice(0,limit),threeWhiteSoldiers:all.filter(x=>x.type==='three_white_soldiers').slice(0,limit)};
