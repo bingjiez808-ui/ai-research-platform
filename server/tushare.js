@@ -12,7 +12,7 @@ const TOKEN = process.env.TUSHARE_TOKEN;
 export const isConfigured = Boolean(TOKEN);
 
 const tushareApi = axios.create({
-  baseURL: 'http://api.tushare.pro',
+  baseURL: 'https://api.tushare.pro',
   timeout: 12000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -45,26 +45,19 @@ export function toTsCode(code) {
   return `${c}.SZ`; // 深市主板 / 创业板
 }
 
-// 拉取官方「上市」股票全集（分页，最多 5000/页），返回权威 universe 与交易所拆分。
+// 拉取官方「上市」股票全集，返回权威 universe 与交易所拆分。
 // 注：仅 list_status='L'（上市中）。暂停/退市由调用方用 stock_basic 另查或文档化说明。
+// 免费账户的 stock_basic 通常只有每小时一次调用额度。该接口本身可在单次
+// 响应中返回当前上市全集，因此不能按 5000 条分页，否则第二页会立即触发
+// 限流并让已经拿到的第一页也被整体丢弃。
 export async function getListedUniverse() {
   if (!isConfigured) return null;
-  const all = [];
-  let offset = 0;
-  const limit = 5000;
-  while (true) {
-    const data = await callTushare('stock_basic', {
-      exchange: '',
-      list_status: 'L',
-      offset,
-      limit,
-      fields: 'ts_code,symbol,name,exchange,list_status,delist_date',
-    });
-    const rows = rowsToObjects(data);
-    all.push(...rows);
-    if (rows.length < limit) break; // 不足一页，说明已拉完
-    offset += limit;
-  }
+  const data = await callTushare('stock_basic', {
+    exchange: '',
+    list_status: 'L',
+    fields: 'ts_code,symbol,name,exchange,list_status,delist_date',
+  });
+  const all = rowsToObjects(data);
   const byExchange = { SSE: 0, SZSE: 0, BSE: 0, OTHER: 0 };
   for (const r of all) {
     const ex = String(r.exchange || '').toUpperCase();
