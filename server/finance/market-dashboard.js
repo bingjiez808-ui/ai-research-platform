@@ -8,6 +8,7 @@ import { scanLiveMarket } from './live-market-scan.js';
 import { getHotSectorRecommendations } from './hot-sectors.js';
 import { getNewsIntelligence } from './news-intelligence.js';
 import { evaluateStrategy } from './strategy-evaluator.js';
+import { buildRecommendationSummary, buildTradePlan, decisionLabel, weightedScore } from './trade-plan.js';
 
 export const marketDashboardRouter = Router();
 const asNumber = value => value == null ? null : Number(value);
@@ -55,22 +56,24 @@ function scoreStock(stock) {
   const change20=closes.length>=21?(closes.at(-1)/closes.at(-21)-1)*100:null,change=asNumber(latest?.changePercent),roe=asNumber(f?.roe),pe=asNumber(latest?.pe),pb=asNumber(latest?.pb);
   const news=stock.news||[],keywordSentiment=title=>{const text=String(title||'').toLowerCase(),positive=['增长','增持','回购','中标','突破','创新高','profit','growth','buyback','upgrade'],negativeWords=['亏损','减持','处罚','调查','诉讼','下滑','风险','loss','probe','penalty','downgrade'];return positive.some(word=>text.includes(word))?0.35:negativeWords.some(word=>text.includes(word))?-0.35:0;},sentiments=news.map(x=>asNumber(x.sentiment)??keywordSentiment(x.title)),newsMean=sentiments.length?sentiments.reduce((a,b)=>a+b,0)/sentiments.length:null,negative=sentiments.filter(x=>x<-.2).length;
   const citations=[...prices.slice(-3).map(x=>({type:'market',title:`${stock.code} ${x.tradeDate.toISOString().slice(0,10)} 日线`,url:x.sourceUrl,source:x.source?.name,asOf:x.tradeDate,fetchedAt:x.fetchedAt,data:{close:asNumber(x.close),changePercent:asNumber(x.changePercent)}})),...(f?[{type:'fundamental',title:`${stock.code} ${f.periodEnd.toISOString().slice(0,10)} 财务数据`,url:f.sourceUrl,source:f.source?.name,asOf:f.periodEnd,fetchedAt:f.fetchedAt,data:{roe,netProfit:asNumber(f.netProfit),revenue:asNumber(f.revenue)}}]:[]),...news.slice(0,5).map(x=>({type:'news',title:x.title,url:x.url,source:x.source?.name,asOf:x.publishedAt,fetchedAt:x.fetchedAt,data:{sentiment:asNumber(x.sentiment)}}))];
-  const marketScore=change20==null?null:clamp(50+change20*1.5+(change||0)*2),fundamentalScore=roe==null?null:clamp(50+roe*1.8+(pe>0&&pe<35?8:pe>80?-12:0)+(pb>0&&pb<4?5:0)),newsScore=newsMean==null?null:clamp(50+newsMean*35-negative*2);
+  const ma=p=>closes.length>=p?closes.slice(-p).reduce((a,b)=>a+b,0)/p:null,ma5=ma(5),ma10=ma(10),ma20=ma(20),technicalScore=ma20==null?null:clamp(45+(latest&&asNumber(latest.close)>=ma20?12:-12)+(ma5>=ma10?10:-8)+(ma10>=ma20?10:-8)+(change20==null?0:Math.max(-15,Math.min(15,change20)))),marketScore=change20==null?null:clamp(50+change20*1.2+(change||0)*1.5),fundamentalScore=roe==null?null:clamp(50+roe*1.8+(pe>0&&pe<35?8:pe>80?-12:0)+(pb>0&&pb<4?5:0)),newsScore=newsMean==null?null:clamp(50+newsMean*35-negative*2);
   const volatility=closes.length>=20?Math.sqrt(closes.slice(-20).reduce((sum,x,i,arr)=>i?sum+Math.pow((x/arr[i-1]-1)*100,2):sum,0)/19):null,riskScore=volatility==null?null:clamp(75-volatility*5-negative*4-(Math.abs(change||0)>7?15:0));
   const researchInputs=[marketScore,fundamentalScore,newsScore,riskScore].filter(Number.isFinite),researchScore=researchInputs.length>=3?researchInputs.reduce((a,b)=>a+b,0)/researchInputs.length:null;
   const agents=[
-    {agent:'market-agent',score:marketScore,view:marketScore==null?'行情历史不足':`20日收益 ${change20.toFixed(2)}%，最新日涨跌 ${change==null?'未知':change.toFixed(2)+'%'}`},
+    {agent:'technical-agent',score:technicalScore,view:technicalScore==null?'技术历史不足':`MA5 ${ma5.toFixed(2)}、MA10 ${ma10.toFixed(2)}、MA20 ${ma20.toFixed(2)}；20日收益 ${change20.toFixed(2)}%`},
+    {agent:'market-agent',score:marketScore,view:marketScore==null?'市场行情历史不足':`20日相对动量 ${change20.toFixed(2)}%，最新日涨跌 ${change==null?'未知':change.toFixed(2)+'%'}`},
     {agent:'fundamentals-agent',score:fundamentalScore,view:fundamentalScore==null?'财务证据不足':`ROE ${roe.toFixed(2)}%，PE ${pe??'未知'}，PB ${pb??'未知'}`},
-    {agent:'news-agent',score:newsScore,view:newsScore==null?'无可审计新闻证据':`分析 ${news.length} 条真实公告/研报标题；缺少供应商情绪值时使用透明关键词规则，负面 ${negative} 条`},
+    {agent:'sentiment-agent',score:newsScore,view:newsScore==null?'无可审计情绪证据':`分析 ${news.length} 条真实公告/研报；缺少供应商情绪值时使用透明关键词规则，负面 ${negative} 条`},
     {agent:'risk-agent',score:riskScore,view:riskScore==null?'波动历史不足':`20日波动指标 ${volatility.toFixed(2)}，负面新闻 ${negative} 条`},
     {agent:'research-debate-agent',score:researchScore,view:researchScore==null?'不足三个角色形成有效观点，辩论不下结论':`综合市场、基本面、新闻与风险角色，形成审慎聚合观点`},
-  ].map(agent=>({...agent,evidence:citations.filter(x=>agent.agent==='market-agent'?x.type==='market':agent.agent==='fundamentals-agent'?x.type==='fundamental':agent.agent==='news-agent'?x.type==='news':true).slice(0,6)}));
-  const available=agents.slice(0,4).filter(x=>Number.isFinite(x.score)),completeness=available.length/4,evidenceSufficient=available.length>=3&&closes.length>=20&&citations.length>=4;
-  const totalScore=evidenceSufficient?clamp(available.reduce((sum,x)=>sum+x.score,0)/available.length*completeness):null;
+  ].map(agent=>({...agent,evidence:citations.filter(x=>['technical-agent','market-agent'].includes(agent.agent)?x.type==='market':agent.agent==='fundamentals-agent'?x.type==='fundamental':agent.agent==='sentiment-agent'?x.type==='news':true).slice(0,6)}));
+  const scoreBreakdown={technical:technicalScore,sentiment:newsScore,market:marketScore,fundamental:fundamentalScore},available=Object.values(scoreBreakdown).filter(Number.isFinite),completeness=available.length/4,evidenceSufficient=available.length>=3&&closes.length>=20&&citations.length>=4;
+  const totalScore=evidenceSufficient?weightedScore(scoreBreakdown):null;
   const recommendation=!evidenceSufficient?'insufficient-evidence':totalScore>=72?'research-candidate':totalScore>=58?'watch':'avoid-for-now';
   const reason=!evidenceSufficient?'行情、财务、新闻、风险四类证据中至少三类且20日行情是形成推荐的最低门槛；当前不足，不强推。':`多角色加权前均分 ${totalScore.toFixed(2)}，证据完整度 ${(completeness*100).toFixed(0)}%，${recommendation==='research-candidate'?'可进入人工深研，不等同买入建议':recommendation==='watch'?'分歧或优势有限，继续观察':'综合证据不支持列为优先候选'}。`;
   const asOf=citations.reduce((latest,x)=>!latest||new Date(x.asOf)>new Date(latest)?x.asOf:latest,null);
-  return{code:stock.code,name:stock.name,industry:stock.industry?.name||null,totalScore:totalScore==null?null:Number(totalScore.toFixed(2)),recommendation,reason,evidenceSufficient,evidenceCompleteness:Number(completeness.toFixed(2)),agents,evidence:citations,asOf,risks:[...(!evidenceSufficient?['证据不足，禁止方向性推荐。']:[]),disclosure]};
+  const tradePlan=buildTradePlan(prices,totalScore??50,{evidenceSufficient}),finalDecision={action:tradePlan.status==='ready'?tradePlan.action:recommendation,label:decisionLabel(tradePlan.status==='ready'?tradePlan.action:recommendation),summary:reason},recommendationSummary=buildRecommendationSummary(scoreBreakdown,riskScore,tradePlan,{evidenceSufficient});
+  return{code:stock.code,name:stock.name,industry:stock.industry?.name||null,totalScore:totalScore==null?null:Number(totalScore.toFixed(2)),recommendation,finalDecision,tradePlan,scoreBreakdown,recommendationSummary,reason,evidenceSufficient,evidenceCompleteness:Number(completeness.toFixed(2)),agents,evidence:citations,asOf,risks:[...recommendationSummary.risks,...(!evidenceSufficient?['证据不足，禁止方向性推荐。']:[]),disclosure]};
 }
 
 marketDashboardRouter.get('/market/recommendations/top10', async (_req,res,next)=>{try{

@@ -147,6 +147,46 @@ function EventItem({ event, as = "button", onClick }) {
   );
 }
 
+function TradePlanCard({ plan, compact = false }) {
+  if (!plan || plan.status !== "ready")
+    return <div className="trade-plan unavailable">买卖区间：{plan?.reason || "有效日线或证据不足，暂不生成价格。"}</div>;
+  return (
+    <div className={`trade-plan ${compact ? "compact" : ""}`}>
+      <div><span>观察价</span><b>{num(plan.observationPrice)}</b></div>
+      <div><span>建议买入区间</span><b>{num(plan.buyZone?.low)}–{num(plan.buyZone?.high)}</b></div>
+      <div><span>确认价</span><b>{num(plan.confirmationPrice)}</b></div>
+      <div><span>止损/失效价</span><b>{num(plan.stopLoss)}</b></div>
+      <div><span>目标卖出价</span><b>{(plan.sellTargets || []).map(x => num(x)).join(" / ") || "--"}</b></div>
+      <div><span>风险收益比</span><b>{num(plan.riskReward)} : 1</b></div>
+      {!compact && <p>{plan.conditions?.join("；")}</p>}
+    </div>
+  );
+}
+
+function ScoreBreakdown({ scores = {} }) {
+  const labels = { technical: "技术", sentiment: "情绪", market: "市场", fundamental: "基本面" };
+  return <div className="score-breakdown">{Object.entries(labels).map(([key,label])=><div key={key}><span>{label}</span><b>{scores[key] == null ? "证据不足" : num(scores[key],1)}</b><i style={{width:`${Math.max(0,Math.min(100,scores[key]||0))}%`}} /></div>)}</div>;
+}
+
+function Stars({ value }) {
+  return <span className="stars">{value == null ? "暂不可评" : `${"★".repeat(value)}${"☆".repeat(5-value)}`}</span>;
+}
+
+function RecommendationSummary({ data }) {
+  if (!data) return null;
+  return <div className="recommendation-summary">
+    <div className="rating-grid">
+      <div><span>买卖建议</span><Stars value={data.buySellRating} /></div>
+      <div><span>风险等级 · {data.riskLevel}</span><Stars value={data.riskRating} /></div>
+      <div><span>长期持有</span><Stars value={data.longTermRating} /></div>
+    </div>
+    <div className="reason-risk-grid">
+      <article><b>为什么推荐？</b>{(data.reasons || []).map((x,i)=><p key={i}>• {x}</p>)}</article>
+      <article><b>有哪些风险？</b>{(data.risks || []).map((x,i)=><p key={i}>• {x}</p>)}</article>
+    </div>
+  </div>;
+}
+
 function TopRecommendations({ items = [], payload, onStock }) {
   const [open, setOpen] = useState("");
   const contract = payload?.data || {},
@@ -222,12 +262,15 @@ function TopRecommendations({ items = [], payload, onStock }) {
               {expanded && (
                 <div className="top-detail">
                   <p>
-                    <b>推荐理由：</b>
+                    <b>{stock.finalDecision?.label || "综合结论"}：</b>
                     {stock.reason ||
                       stock.recommendationReason ||
                       stock.summary ||
                       "接口未提供推荐理由。"}
                   </p>
+                  <ScoreBreakdown scores={stock.scoreBreakdown} />
+                  <RecommendationSummary data={stock.recommendationSummary} />
+                  <TradePlanCard plan={stock.tradePlan} compact />
                   {agents.length > 0 && (
                     <div className="agent-score-list">
                       {agents.map((agent, j) => (
@@ -2476,8 +2519,8 @@ function StockIntelligence({ initialCode, onAsk }) {
                         <div className="decision-summary">
                           <div>
                             <span>投委会动作</span>
-                            <strong>{enumZh(d.action)}</strong>
-                            <p>{d.investmentCommittee?.summary}</p>
+                            <strong>{d.finalDecision?.label || enumZh(d.action)}</strong>
+                            <p>{d.finalDecision?.summary || d.investmentCommittee?.summary}</p>
                           </div>
                           <div>
                             <b>{num(d.conviction, 0)}</b>
@@ -2487,6 +2530,9 @@ function StockIntelligence({ initialCode, onAsk }) {
                             </small>
                           </div>
                         </div>
+                        <ScoreBreakdown scores={d.scoreBreakdown} />
+                        <RecommendationSummary data={d.recommendationSummary} />
+                        <TradePlanCard plan={d.tradePlan} />
                         <div className="debate-grid">
                           <article className="bull">
                             <span>看多研究员</span>
