@@ -3,6 +3,7 @@ import { runScheduledJob } from './runner.js';
 
 const timezone=process.env.SCHEDULER_TIMEZONE||'Asia/Shanghai';
 const tasks=[
+  ['*/15 * * * *','free-news-refresh'],
   ['0 8 * * 1-5','trade-calendar-refresh'],
   ['30 9 * * 1-5','market-open'],
   ['30 15 * * 1-5','market-close'],

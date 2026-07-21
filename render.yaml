@@ -29,4 +29,15 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # 如需外部 API 密钥/代理等，在此添加；当前应用无必需密钥。
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: CLS_FREE_NEWS_ENABLED
+        value: "true"
+      - key: SINA_FREE_NEWS_ENABLED
+        value: "true"
+      - key: CNINFO_ENABLED
+        value: "true"
+      # DeepSeek 密钥只在 Render 控制台添加，不提交到 GitHub：
+      # FINANCE_LLM_BASE_URL=https://api.deepseek.com
+      # FINANCE_LLM_MODEL=deepseek-v4-flash
+      # FINANCE_LLM_API_KEY=<Render secret>
