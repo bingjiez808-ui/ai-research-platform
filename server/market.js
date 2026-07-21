@@ -518,8 +518,10 @@ export async function getMarketBreadth() {
 }
 
 // 后台预热 + 定时刷新（统一经 getMarketBreadth，保证同一时刻只有一个在途计算；预热延迟 2s 避免进程刚启动时的瞬时抖动）
-setTimeout(() => { getMarketBreadth().catch(() => {}); }, 2000);
-setInterval(() => { getMarketBreadth().catch(() => {}); }, BREADTH_TTL);
+if(process.env.NODE_ENV!=='test'){
+  setTimeout(() => { getMarketBreadth().catch(() => {}); }, 2000);
+  setInterval(() => { getMarketBreadth().catch(() => {}); }, BREADTH_TTL);
+}
 
 
 // ==================== 热门推荐股票 ====================
@@ -579,6 +581,17 @@ export async function getStockQuotes(codes=[]) {
     try{const data=await fetchTencent(requested.slice(i,i+80));for(const line of data.split('\n').filter(value=>value.includes('='))){const stock=parseTencentStock(line);if(stock?.name&&stock.price>0)out.push(stock);}}catch{/* 调用方负责显示覆盖不足 */}
   }
   return out;
+}
+
+// 免费全市场故障回退：枚举标准沪深 A 股代码并由腾讯批量返回有效证券。
+// 仅在东方财富全市场快照不可达时使用；结果带明确 source，避免冒充交易所授权数据。
+export async function getAllMarketQuotes() {
+  const batches=[];
+  for(let i=0;i<ALL_A_CODES.length;i+=500)batches.push(ALL_A_CODES.slice(i,i+500));
+  const rows=[];let cursor=0;
+  const worker=async()=>{while(cursor<batches.length){const batch=batches[cursor++];try{const data=await fetchTencent(batch);for(const line of data.split('\n')){const stock=parseTencentStock(line);if(stock?.name&&stock.price>0)rows.push({...stock,source:'腾讯全市场代码枚举'});}}catch{/* 单批失败由覆盖率反映 */}}};
+  await Promise.all(Array.from({length:8},()=>worker()));
+  return [...new Map(rows.map(row=>[row.code,row])).values()];
 }
 
 export async function getStockQuote(code) {

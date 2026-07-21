@@ -13,6 +13,7 @@
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.js",
     "lint": "oxlint",
+    "test": "NODE_ENV=test node --test",
     "preview": "vite preview",
     "db:migrate": "prisma migrate deploy",
     "ingest": "node --env-file-if-exists=.env scripts/ingest-research.js",

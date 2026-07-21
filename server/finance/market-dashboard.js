@@ -4,6 +4,7 @@ import { getMarketIndexes, getMarketBreadth, getStockQuotes } from '../market.js
 import { getIndustryRanking } from '../eastmoney.js';
 import { marketAnalyst, stockResearch } from './agents/index.js';
 import { analyzePortfolio, ownerKey } from './portfolio/service.js';
+import { scanLiveMarket } from './live-market-scan.js';
 
 export const marketDashboardRouter = Router();
 const asNumber = value => value == null ? null : Number(value);
@@ -66,7 +67,7 @@ function scoreStock(stock) {
 }
 
 marketDashboardRouter.get('/market/recommendations/top10', async (_req,res,next)=>{try{
-  if(!process.env.DATABASE_URL)return res.json({success:true,data:{method:{id:'trading-agents-role-debate-v2',roles:['market-agent','fundamentals-agent','news-agent','risk-agent'],minimumEvidence:'需连接数据库后扫描行情、财务与新闻证据'},items:[],coverage:{candidatesScored:0,evidenceEligible:0,returned:0,insufficientEvidence:0},disclosure},meta:{source:'无数据库预览模式',status:'insufficient-evidence',mock:false,fetchedAt:new Date()}});
+  if(!process.env.DATABASE_URL){const data=await scanLiveMarket();return res.json({success:true,data,meta:{source:data.source,status:data.status,mock:false,fetchedAt:new Date(),scannedAt:data.scannedAt,dataAsOf:data.dataAsOf,coverage:data.coverage,degradation:data.degradation}});}
   const stocks=await getPrisma().stock.findMany({where:{status:'listed',prices:{some:{interval:'1d'}}},include:{industry:true,prices:{where:{interval:'1d'},take:60,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:4,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}});
   const scored=stocks.map(scoreStock),eligible=scored.filter(x=>x.evidenceSufficient&&x.totalScore!=null).sort((a,b)=>b.totalScore-a.totalScore),items=eligible.slice(0,10);
   res.json({success:true,data:{method:{id:'trading-agents-role-debate-v2',roles:['market-agent','fundamentals-agent','news-agent','risk-agent','research-debate-agent'],aggregation:'四个专业角色可用分数均值 × 证据完整度；研究/辩论角色复核观点',minimumEvidence:'至少3/4专业角色、20条日线、4条可引用证据；不足不进入Top10',candidateUniverse:'数据库 status=listed 且有真实日线'},items,coverage:{candidatesScored:stocks.length,evidenceEligible:eligible.length,returned:items.length,insufficientEvidence:scored.length-eligible.length},disclosure},meta:{source:'PostgreSQL audited market/financial/news data',status:items.length?'live':'insufficient-evidence',mock:false,fetchedAt:new Date(),dataAsOf:items.reduce((latest,x)=>!latest||new Date(x.asOf)>new Date(latest)?x.asOf:latest,null)}});

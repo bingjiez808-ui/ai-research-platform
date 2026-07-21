@@ -12,6 +12,18 @@ export async function fetchQuotes({ page = 1, size = 100 } = {}) {
   } catch (e) { fail('quotes', e); }
 }
 
+export async function fetchFullMarketSnapshot({ pageSize = 500, maxPages = 15 } = {}) {
+  const rows = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await fetchQuotes({ page, size: pageSize });
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  const unique = [...new Map(rows.filter(row => row?.f12 && row?.f14).map(row => [String(row.f12), row])).values()];
+  if (unique.length < 1000) throw Object.assign(new Error(`Eastmoney snapshot returned only ${unique.length} securities`), { provider: 'eastmoney', code: 'INCOMPLETE_SNAPSHOT', status: 502 });
+  return unique;
+}
+
 export async function fetchPriceHistory(code, limit = 120) {
   try {
     const { data } = await http.get('https://push2his.eastmoney.com/api/qt/stock/kline/get', { params: { secid: secid(code), klt: 101, fqt: 1, lmt: limit, end: '20500101', fields1: 'f1,f2,f3,f4,f5,f6', fields2: 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61' } });
