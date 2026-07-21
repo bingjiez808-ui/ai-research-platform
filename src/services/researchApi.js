@@ -17,12 +17,16 @@ async function request(path,{method='GET',params,body,signal,owner=false}={}) {
   const headers={Accept:'application/json'};
   if(owner)headers['X-Owner-Key']=ownerKey();
   if(body && !(body instanceof FormData))headers['Content-Type']='application/json';
-  const response=await fetch(`${BASE}${path}${query(params)}`,{method,signal,headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
+  const response=await fetch(`${BASE}${path}${query(params)}`,{method,signal,headers,credentials:'include',body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
   const payload=await response.json().catch(()=>null);
   if(!response.ok||payload?.success===false)throw new Error(payload?.error?.message||payload?.message||`HTTP ${response.status}`);
   return payload;
 }
 export const api={
+  login:data=>request('/auth/login',{method:'POST',body:data}),
+  register:data=>request('/auth/register',{method:'POST',body:data}),
+  me:signal=>request('/auth/me',{signal}),
+  logout:()=>request('/auth/logout',{method:'POST'}),
   stocks:(params,signal)=>request('/stocks',{params,signal}),
   stock:(code,signal)=>request(`/stocks/${encodeURIComponent(code)}`,{signal}),
   priceHistory:(code,params,signal)=>request(`/stocks/${encodeURIComponent(code)}/price-history`,{params,signal}),
@@ -30,7 +34,8 @@ export const api={
   trend:(params,signal)=>request('/market/trend',{params,signal}),
   marketDashboard:signal=>request('/market/dashboard',{signal}),
   marketSummary:signal=>request('/market/ai-summary',{signal}),
-  marketTop10:signal=>request('/market/recommendations/top10',{signal}),
+  marketTop10:signal=>request('/market/top10/latest',{signal}),
+  dailySummary:signal=>request('/daily-summary/today',{signal,owner:true}),
   marketScreener:(params,signal)=>request('/market/scans/technical',{params,signal}),
   majorEvents:signal=>request('/events/major',{signal}),
   watchlist:signal=>request('/watchlist',{signal,owner:true}),

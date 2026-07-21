@@ -8,6 +8,9 @@ import { experienceRouter } from './finance/experience/routes.js';
 import { marketDashboardRouter } from './finance/market-dashboard.js';
 import { dailyAgentRouter } from './finance/daily-agent/routes.js';
 import { startScheduler } from './scheduler/index.js';
+import { authRouter, sessionMiddleware } from './auth.js';
+import { marketScanRouter } from './finance/market-scan.js';
+import { dailySummaryRouter } from './finance/daily-summary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -17,14 +20,18 @@ const PORT = Number(process.env.PORT || 3001);
 // Serialize them as strings to preserve precision in API responses.
 app.set('json replacer', (_key, value) => typeof value === 'bigint' ? value.toString() : value);
 app.disable('x-powered-by');
-app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false }));
+app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+app.use(sessionMiddleware);
 
+app.use('/api', authRouter);
 app.use('/api', financeRouter);
 app.use('/api', portfolioRouter);
 app.use('/api', experienceRouter);
 app.use('/api', marketDashboardRouter);
 app.use('/api', dailyAgentRouter);
+app.use('/api', marketScanRouter);
+app.use('/api', dailySummaryRouter);
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'ai-a-share-research', time: new Date().toISOString() });
 });
@@ -33,9 +40,10 @@ app.get('/api/health', (_req, res) => {
 app.use('/api', (err, req, res, next) => {
   console.error('API error:', { method: req.method, path: req.path, code: err.code, message: err.message });
   if (res.headersSent) return next(err);
-  res.status(err.status || 500).json({
+  const status=err.status || 500;
+  res.status(status).json({
     success: false,
-    error: { code: err.code || 'INTERNAL_ERROR', message: err.message, provider: err.provider || undefined },
+    error: { code: status >= 500 ? (err.code || 'INTERNAL_ERROR') : (err.code || 'REQUEST_FAILED'), message: status >= 500 ? 'The service could not complete the request' : err.message, provider: err.provider || undefined },
   });
 });
 

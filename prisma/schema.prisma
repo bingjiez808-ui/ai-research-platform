@@ -687,3 +687,50 @@ model IngestionRun {
   @@index([job, startedAt(sort: Desc)])
   @@map("finance_ingestion_runs")
 }
+
+model LocalUser {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  displayName  String?       @map("display_name")
+  passwordHash String        @map("password_hash")
+  passwordSalt String        @map("password_salt")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  sessions     UserSession[]
+
+  @@map("local_users")
+}
+
+model UserSession {
+  id        BigInt    @id @default(autoincrement())
+  userId    String    @map("user_id")
+  user      LocalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  @@index([userId, expiresAt])
+  @@map("user_sessions")
+}
+
+model MarketScanRun {
+  id             BigInt    @id @default(autoincrement())
+  tradeDate      DateTime? @map("trade_date") @db.Date
+  trigger        String    @default("manual")
+  status         String    @default("running")
+  provider       String
+  universeSize   Int       @default(0) @map("universe_size")
+  snapshotSize   Int       @default(0) @map("snapshot_size")
+  coveredCount   Int       @default(0) @map("covered_count")
+  candidateCount Int       @default(0) @map("candidate_count")
+  actualUniverse Json      @default("{}") @map("actual_universe")
+  degradation    Json      @default("[]")
+  results        Json      @default("[]")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  error          String?
+
+  @@index([startedAt(sort: Desc), status])
+  @@map("market_scan_runs")
+}
