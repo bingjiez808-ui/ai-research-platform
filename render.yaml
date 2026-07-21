@@ -37,6 +37,12 @@ services:
         value: "true"
       - key: CNINFO_ENABLED
         value: "true"
+      - key: FINANCE_LLM_PROVIDER
+        value: deepseek
+      - key: FINANCE_LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: FINANCE_LLM_MODEL
+        value: deepseek-v4-flash
       # DeepSeek 密钥只在 Render 控制台添加，不提交到 GitHub：
       # FINANCE_LLM_BASE_URL=https://api.deepseek.com
       # FINANCE_LLM_MODEL=deepseek-v4-flash
