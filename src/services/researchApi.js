@@ -17,7 +17,10 @@ async function request(path,{method='GET',params,body,signal,owner=false}={}) {
   const headers={Accept:'application/json'};
   if(owner)headers['X-Owner-Key']=ownerKey();
   if(body && !(body instanceof FormData))headers['Content-Type']='application/json';
-  const response=await fetch(`${BASE}${path}${query(params)}`,{method,signal,headers,credentials:'include',body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
+  // Dashboard data changes continuously and Render may briefly serve a stale
+  // cached GET response while a new instance is coming online. Always
+  // revalidate API reads so an early empty response cannot stick on the page.
+  const response=await fetch(`${BASE}${path}${query(params)}`,{method,signal,headers,credentials:'include',cache:'no-store',body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
   const payload=await response.json().catch(()=>null);
   if(!response.ok||payload?.success===false)throw new Error(payload?.error?.message||payload?.message||`HTTP ${response.status}`);
   return payload;
