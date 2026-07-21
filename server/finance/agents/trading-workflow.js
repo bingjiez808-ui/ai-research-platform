@@ -1,5 +1,7 @@
 import { getPrisma } from '../../research/prisma.js';
 import { agents } from './production.js';
+import { llmConfigured } from './llm-client.js';
+import { runLlmTradingWorkflow } from './llm-workflow.js';
 
 const VERSION = 'trading-debate-1.0.0';
 const clamp = value => Math.max(0, Math.min(100, value));
@@ -8,7 +10,7 @@ function stance(score) {
   return score >= 67 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral';
 }
 
-export async function runTradingWorkflow(code) {
+export async function runTradingWorkflow(code,{mode='auto'}={}) {
   const db = getPrisma();
   const stock = await db.stock.findUnique({
     where: { code },
@@ -19,6 +21,7 @@ export async function runTradingWorkflow(code) {
     },
   });
   if (!stock) throw Object.assign(new Error(`Stock ${code} not found`), { status: 404, code: 'STOCK_NOT_FOUND' });
+  if(mode==='llm'||(mode==='auto'&&llmConfigured()))return runLlmTradingWorkflow(stock);
 
   const research = agents.research(stock);
   const market = agents.market(stock);
@@ -38,7 +41,7 @@ export async function runTradingWorkflow(code) {
   const action = confidence < 0.6 || closes.length < 20 ? 'hold-and-observe' : rawAction;
 
   return {
-    workflow: 'TradingAgents-inspired evidence debate', version: VERSION, code, name: stock.name,
+    workflow: 'TradingAgents-inspired evidence debate', version: VERSION, executionMode:'deterministic', configured:llmConfigured(), code, name: stock.name,
     asOf: new Date(), action, conviction, confidence, return20,
     analysts: { research, market, risk }, debate,
     investmentCommittee: {

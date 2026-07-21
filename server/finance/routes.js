@@ -49,7 +49,8 @@ financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
 }catch(e){next(e);}});
 
 financeRouter.get('/decision/:code', async(req,res,next)=>{try{
-  res.json({success:true,data:await runTradingWorkflow(cleanCode(req.params.code)),meta:meta('PostgreSQL evidence + TradingAgents-inspired workflow')});
+  const mode=req.query.mode==='llm'?'llm':req.query.mode==='deterministic'?'deterministic':'auto';
+  res.json({success:true,data:await runTradingWorkflow(cleanCode(req.params.code),{mode}),meta:meta('PostgreSQL evidence + TradingAgents workflow')});
 }catch(e){next(e);}});
 
 financeRouter.get('/market/trend', async (req,res,next)=>{try{

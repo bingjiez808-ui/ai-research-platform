@@ -22,7 +22,9 @@ services:
     # Prisma only needs a syntactically valid URL while generating the client;
     # runtime database access still requires a real DATABASE_URL in Render.
     buildCommand: npm ci --include=dev && DATABASE_URL=postgresql://preview:preview@localhost:5432/preview npm run db:generate && npm run build
-    startCommand: npm start
+    # Apply checked-in migrations before accepting traffic. This is idempotent
+    # and uses DIRECT_URL when configured, otherwise DATABASE_URL.
+    startCommand: npm run db:migrate && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
