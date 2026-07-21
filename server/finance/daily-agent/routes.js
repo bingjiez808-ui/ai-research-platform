@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { getPrisma } from '../../research/prisma.js';
 import { cleanCode } from '../normalize.js';
 import { ownerKey } from '../portfolio/service.js';
-import { collectMajorEvents, runDailyAgent } from './service.js';
+import { runDailyAgent } from './service.js';
+import { collectMajorEvents } from '../events/collector.js';
 
 export const dailyAgentRouter=Router();
 const limit=(value,fallback=30,max=100)=>Math.min(max,Math.max(1,Number.parseInt(value||fallback,10)||fallback));

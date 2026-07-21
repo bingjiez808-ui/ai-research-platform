@@ -1,42 +1,11 @@
-import crypto from 'node:crypto';
-import axios from 'axios';
 import { getPrisma } from '../../research/prisma.js';
 import { fetchFinancials, fetchPriceHistory } from '../adapters/eastmoney.js';
 import { TushareProvider } from '../providers/tushare.js';
+import { collectMajorEvents } from '../events/collector.js';
 
-const CATEGORIES = [
-  ['geopolitics', '(geopolitics OR sanctions OR war OR tariff) finance'],
-  ['central-bank-policy', '(central bank OR PBOC OR Federal Reserve OR interest rate)'],
-  ['industry-policy', '(industry policy OR regulation OR subsidy) economy'],
-  ['economic-data', '(GDP OR CPI OR PMI OR unemployment) economy'],
-];
 const n = value => value == null ? null : Number(value);
-const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 const day = date => new Date(`${new Date(date).toISOString().slice(0,10)}T00:00:00.000Z`);
 const source = (name,url,fetchedAt,status='live',extra={}) => ({name,url,fetchedAt:new Date(fetchedAt).toISOString(),status,...extra});
-
-export async function collectMajorEvents() {
-  const db=getPrisma(), fetchedAt=new Date(), statuses=[], events=[],endpoint='https://api.gdeltproject.org/api/v2/doc/doc';
-  try {
-    // One combined request avoids multiplying public API rate-limit pressure.
-    const query='(geopolitics OR sanctions OR war OR tariff OR "central bank" OR PBOC OR "Federal Reserve" OR "interest rate" OR regulation OR subsidy OR GDP OR CPI OR PMI OR unemployment) economy finance';
-    const {data}=await axios.get(endpoint,{params:{query,mode:'ArtList',maxrecords:50,format:'json',sort:'HybridRel'},timeout:Number(process.env.NEWS_HTTP_TIMEOUT_MS||15000),headers:{'User-Agent':process.env.FINANCE_USER_AGENT||'ai-research-platform/1.0'}});
-    const rows=Array.isArray(data?.articles)?data.articles:[];if(!rows.length)throw new Error('empty response');
-    for(const row of rows){if(!row.url||!row.title)continue;const category=majorCategory(row.title),publishedAt=gdeltDate(row.seendate)||fetchedAt,canonicalKey=hash(row.url);events.push(await db.majorFinancialEvent.upsert({where:{canonicalKey},create:{canonicalKey,category,title:row.title,summary:null,publishedAt,sourceName:row.domain||'GDELT indexed publisher',sourceUrl:endpoint,articleUrl:row.url,fetchedAt,retrievalStatus:'live',raw:row},update:{category,title:row.title,publishedAt,sourceName:row.domain||'GDELT indexed publisher',articleUrl:row.url,fetchedAt,retrievalStatus:'live',raw:row}}));}
-    statuses.push(source('GDELT 2.1 DOC API',endpoint,fetchedAt,'live',{categories:CATEGORIES.map(([category])=>category),count:rows.length}));
-  } catch(error) {statuses.push(source('GDELT 2.1 DOC API',endpoint,fetchedAt,'degraded',{error:error.message}));}
-  if(!events.length){
-    const cached=await db.majorFinancialEvent.findMany({take:48,orderBy:{publishedAt:'desc'}});
-    events.push(...cached);
-    statuses.push(source('PostgreSQL event cache','database://major_financial_events',fetchedAt,'degraded',{count:cached.length}));
-  }
-  return {events:dedupe(events).sort((a,b)=>b.publishedAt-a.publishedAt).slice(0,48),statuses};
-}
-
-function majorCategory(title){const text=String(title).toLowerCase();if(/war|sanction|tariff|geopolit|战争|制裁|关税|地缘/.test(text))return'geopolitics';if(/central bank|pboc|federal reserve|interest rate|央行|人民银行|美联储|利率/.test(text))return'central-bank-policy';if(/regulation|subsidy|industry policy|监管|补贴|产业政策/.test(text))return'industry-policy';return'economic-data';}
-
-function gdeltDate(value){if(!value)return null;const text=String(value);const match=text.match(/^(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);return match?new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]||'00'}:${match[5]||'00'}:00Z`):null;}
-function dedupe(rows){return [...new Map(rows.map(x=>[String(x.id),x])).values()];}
 
 async function stockEvidence(stock){
   const fetchedAt=new Date(), sources=[];let prices=[],financial=null;

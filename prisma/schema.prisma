@@ -276,6 +276,8 @@ model Portfolio {
   ownerKey    String   @map("owner_key")
   name        String
   currency    String   @default("CNY")
+  capital     Decimal? @db.Decimal(24,2)
+  riskPreference String @default("medium") @map("risk_preference")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   holdings    PortfolioHolding[]

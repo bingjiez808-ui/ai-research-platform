@@ -35,6 +35,8 @@ export function Provenance({ source, updatedAt }) {
 export const num = (value, digits = 2) => value === null || value === undefined || value === '' || Number.isNaN(Number(value)) ? '—' : Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits }).format(Number(value));
 export const pct = value => value === null || value === undefined || value === '' ? '—' : `${Number(value) > 0 ? '+' : ''}${num(value)}%`;
 export const tone = value => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : 'flat';
+const ENUM_ZH={neutral:'中性',bullish:'看多',bearish:'看空',positive:'正面',negative:'负面',cautious:'谨慎',high:'高',medium:'中',controlled:'可控','risk-on':'风险偏好','risk-off':'风险规避','hold-and-observe':'持有观察','hold-and-monitor':'持有并监控',monitor:'监控','consider-buy':'考虑分批配置','consider-reduce':'考虑降低仓位','reduce-concentration':'降低集中度','review-risk':'复核风险','no-forced-change':'无需强制调整','insufficient-evidence':'证据不足','research-candidate':'优先研究候选',watch:'继续观察','avoid-for-now':'暂不优先','market-agent':'市场 Agent','fundamentals-agent':'基本面 Agent','news-agent':'新闻 Agent','risk-agent':'风险 Agent','research-debate-agent':'研究辩论 Agent',geopolitics:'地缘政治','central-bank-policy':'央行政策','industry-policy':'行业政策','economic-data':'经济数据',success:'成功',succeeded:'成功',failed:'失败',live:'实时',degraded:'降级',cached:'已缓存',unavailable:'暂不可用',stale:'陈旧缓存','stale-cache':'缓存降级',listed:'上市'};
+export const enumZh=value=>value==null?'—':ENUM_ZH[String(value).toLowerCase()]||String(value);
 
 export function Sparkline({ values = [], positive = true }) {
   const clean = values.map(Number).filter(Number.isFinite);

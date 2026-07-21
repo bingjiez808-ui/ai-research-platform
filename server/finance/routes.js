@@ -8,6 +8,7 @@ import { runProductionAgent } from './agents/production.js';
 import { runTradingWorkflow } from './agents/trading-workflow.js';
 import { fetchPriceHistory } from './adapters/eastmoney.js';
 import { TushareProvider } from './providers/tushare.js';
+import { collectMajorEvents, listMajorEvents } from './events/collector.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -36,6 +37,8 @@ financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
     try{
       const end=new Date().toISOString().slice(0,10).replaceAll('-',''),start=new Date(Date.now()-730*86400000).toISOString().slice(0,10).replaceAll('-',''),rows=await new TushareProvider().dailyQuotes({ts_code:`${code}.${code.startsWith('6')?'SH':'SZ'}`,start_date:start,end_date:end});
       items=rows.slice(0,limit).reverse().map(row=>({tradeDate:`${row.trade_date.slice(0,4)}-${row.trade_date.slice(4,6)}-${row.trade_date.slice(6,8)}`,open:Number(row.open),close:Number(row.close),high:Number(row.high),low:Number(row.low),volume:Number(row.vol)*100,turnover:Number(row.amount)*1000,changePercent:Number(row.pct_chg),change:Number(row.change),raw:row}));
+      const source=await db.dataSource.upsert({where:{key:'tushare'},create:{key:'tushare',name:'Tushare',kind:'market-data',baseUrl:'https://tushare.pro/'},update:{enabled:true}});
+      await db.stockPrice.createMany({skipDuplicates:true,data:items.map(item=>({stockId:stock.id,tradeDate:new Date(`${item.tradeDate}T00:00:00.000Z`),interval:'1d',open:item.open,close:item.close,high:item.high,low:item.low,changePercent:item.changePercent,volume:BigInt(Math.trunc(item.volume)),turnover:item.turnover,sourceId:source.id,providerKey:`${code}:${item.tradeDate}`,sourceUrl:'https://tushare.pro/document/2?doc_id=27',payloadHash:createHash('sha256').update(JSON.stringify(item.raw)).digest('hex'),raw:{...item.raw,adjustment:'none'}}))});
       sourceName='Tushare 历史日线行情（未复权）';liveError=null;
     }catch(fallbackError){liveError=`Eastmoney: ${error.message}; Tushare: ${fallbackError.message}`;}
   }
@@ -64,3 +67,6 @@ financeRouter.get('/providers/health', async(_req,res,next)=>{try{res.json({succ
 financeRouter.get('/agents/:agent/:code', async(req,res,next)=>{try{const data=await runProductionAgent(req.params.agent,cleanCode(req.params.code));res.json({success:true,data,meta:meta('audited production agent')});}catch(e){next(e);}});
 financeRouter.get('/news/clusters', async(req,res,next)=>{try{const data=await getPrisma().newsCluster.findMany({take:integer(req.query.limit,30,100),orderBy:{lastSeenAt:'desc'},include:{members:{take:5,include:{article:{select:{id:true,title:true,publishedAt:true,url:true}}}}}});res.json({success:true,data,meta:meta('PostgreSQL news intelligence')});}catch(e){next(e);}});
 financeRouter.get('/events/impacts', async(req,res,next)=>{try{const where=req.query.code?{stock:{code:cleanCode(req.query.code)}}:{};const data=await getPrisma().eventImpact.findMany({where,take:integer(req.query.limit,50,200),orderBy:{calculatedAt:'desc'},include:{event:true,stock:{select:{code:true,name:true}}}});res.json({success:true,data,meta:meta('event-window-v1')});}catch(e){next(e);}});
+
+financeRouter.get('/events/major',async(req,res,next)=>{try{const data=await listMajorEvents({limit:integer(req.query.limit,50,200),category:req.query.category?String(req.query.category):undefined});res.json({success:true,data,meta:{mock:false,source:data.source,status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage}});}catch(e){next(e);}});
+financeRouter.post('/events/major/refresh',async(req,res,next)=>{try{const configured=process.env.SCHEDULER_REFRESH_TOKEN,provided=req.get('x-scheduler-token');if(configured&&provided!==configured)return res.status(401).json({success:false,error:{code:'UNAUTHORIZED',message:'Invalid scheduler token'}});const data=await collectMajorEvents();res.json({success:true,data:{items:data.events,statuses:data.statuses},meta:{mock:false,source:data.statuses.map(x=>x.source),status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage,schedulerSafe:true,noOverlap:true}});}catch(e){next(e);}});
