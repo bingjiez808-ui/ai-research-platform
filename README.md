@@ -1,16 +1,47 @@
-# React + Vite
+# AI Research Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React/Vite frontend plus an Express backend for market data and real academic AI research data.
 
-Currently, two official plugins are available:
+## Research backend
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The backend normalizes papers, authors, topics, citations, and Hugging Face models from real upstream APIs. It never substitutes mock data. Every imported entity records provider ID, URL, fetch time, and payload hash in `provenance`.
 
-## React Compiler
+### Requirements
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 22+
+- PostgreSQL 14+
+- Existing dependencies plus **`pg`** (required, intentionally not added to package files in this branch)
+- `DATABASE_URL` is mandatory for research APIs/scripts
+- Provider keys are optional: `SEMANTIC_SCHOLAR_API_KEY`, `OPENALEX_API_KEY`, and `HUGGINGFACE_TOKEN` raise quotas/access where supported. `OPENALEX_EMAIL` and a descriptive `RESEARCH_USER_AGENT` are strongly recommended. arXiv requires no key.
 
-## Expanding the Oxlint configuration
+Copy `.env.example` to `.env`, install `pg`, then:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+```sh
+node --env-file=.env scripts/migrate.js
+node --env-file=.env scripts/ingest-research.js arxiv "cat:cs.AI"
+node --env-file=.env scripts/ingest-research.js semantic-scholar "large language model"
+node --env-file=.env scripts/ingest-research.js openalex "artificial intelligence"
+node --env-file=.env scripts/ingest-research.js huggingface "text-generation"
+node --env-file=.env server/index.js
+```
+
+Ingestion is repeatable: canonical keys and provider provenance use upserts. Upstream timeouts, 429s, and 5xx responses are retried with bounded exponential/`Retry-After` delays and returned as explicit errors.
+
+### API
+
+- `GET /api/research/papers?q=&limit=&offset=`
+- `GET /api/research/papers/:id/citations`
+- `GET /api/research/authors/ranking?limit=`
+- `GET /api/research/trends/ai?months=24`
+- `GET /api/research/topics/evolution`
+- `GET /api/research/models?limit=&offset=`
+- `GET /api/research/provenance/:type/:id`
+- `POST /api/research/ingest/{arxiv|semantic-scholar|openalex|huggingface}` with JSON such as `{ "query": "multimodal", "limit": 50 }`
+
+Citation edges are imported from Semantic Scholar references when the referenced paper is already known under the same provider ID. Re-running ingestion resolves additional edges as referenced papers enter the database.
+
+## Frontend
+
+```sh
+npm run dev
+```

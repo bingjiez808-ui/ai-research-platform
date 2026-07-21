@@ -1,0 +1,45 @@
+/* eslint-disable react/only-export-components -- shared hooks/formatters intentionally colocated with UI primitives */
+import { useEffect, useState } from 'react';
+
+export function useApi(loader, deps = []) {
+  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setState(current => ({ ...current, loading: true, error: null }));
+    Promise.resolve(loader(controller.signal))
+      .then(data => setState({ data, loading: false, error: null }))
+      .catch(error => { if (error.name !== 'AbortError') setState({ data: null, loading: false, error }); });
+    return () => controller.abort();
+  // The caller controls refresh dependencies.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, revision]);
+  return { ...state, retry: () => setRevision(value => value + 1) };
+}
+
+export function DataState({ loading, error, empty, retry, label = 'market intelligence', children }) {
+  if (loading) return <div className="state"><span className="loader"/><strong>Loading {label}</strong><small>Requesting live API data. No fallback data is shown.</small></div>;
+  if (error) return <div className="state error"><span className="state-code">DATA FAILURE</span><strong>{error.message}</strong><small>The upstream response could not be verified. Existing values are not substituted.</small><button onClick={retry}>Retry request</button></div>;
+  if (empty) return <div className="state"><span className="state-code">EMPTY RESPONSE</span><strong>No records returned</strong><small>The source responded successfully, but has no data for this view or filter.</small></div>;
+  return children;
+}
+
+export function Panel({ title, kicker, action, children, className = '' }) {
+  return <section className={`panel ${className}`}><header><div>{kicker && <span className="kicker">{kicker}</span>}<h2>{title}</h2></div>{action}</header>{children}</section>;
+}
+
+export function Provenance({ source, updatedAt }) {
+  return <div className="provenance"><span><b>SOURCE</b> {source || 'Not reported by API'}</span><span><b>FRESHNESS</b> {updatedAt ? new Date(updatedAt).toLocaleString('zh-CN', { hour12: false }) : 'Not reported by API'}</span></div>;
+}
+
+export const num = (value, digits = 2) => value === null || value === undefined || value === '' || Number.isNaN(Number(value)) ? '—' : Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits }).format(Number(value));
+export const pct = value => value === null || value === undefined || value === '' ? '—' : `${Number(value) > 0 ? '+' : ''}${num(value)}%`;
+export const tone = value => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'down' : 'flat';
+
+export function Sparkline({ values = [], positive = true }) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  if (clean.length < 2) return <div className="chart-empty">Insufficient time-series data</div>;
+  const min = Math.min(...clean), max = Math.max(...clean), spread = max - min || 1;
+  const points = clean.map((v, i) => `${(i / (clean.length - 1)) * 100},${38 - ((v - min) / spread) * 34}`).join(' ');
+  return <svg className={`spark ${positive ? 'positive' : 'negative'}`} viewBox="0 0 100 42" preserveAspectRatio="none" aria-label="Price trend"><line x1="0" y1="38" x2="100" y2="38"/><polyline points={points}/></svg>;
+}
