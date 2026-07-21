@@ -455,8 +455,16 @@ function AuthDialog({ open, onClose, onSuccess }) {
         <button type="button" className="auth-close" onClick={onClose}>
           ×
         </button>
+        <aside className="auth-brand">
+          <i>AX</i><span>ARGUS SECURE ACCESS</span>
+          <h2>让每次判断<br/>都有证据。</h2>
+          <p>登录后同步自选股、每日投研任务与投资组合风险分析。</p>
+          <div><b>实时行情</b><b>可审计 Agent</b><b>私有组合</b></div>
+        </aside>
+        <section className="auth-form">
         <span>ARGUS 账户</span>
-        <h2>{mode === "login" ? "登录" : "注册"}</h2>
+        <h2>{mode === "login" ? "欢迎回来" : "创建投研账户"}</h2>
+        <p>{mode === "login" ? "继续查看你的关注列表与组合结论。" : "账户数据仅用于你的个人投研空间。"}</p>
         {mode === "register" && (
           <label>
             姓名
@@ -500,6 +508,8 @@ function AuthDialog({ open, onClose, onSuccess }) {
         >
           {mode === "login" ? "没有账户？立即注册" : "已有账户？返回登录"}
         </button>
+        <small className="auth-security">受保护的会话 · 密码不会写入浏览器日志</small>
+        </section>
       </form>
     </div>
   );
