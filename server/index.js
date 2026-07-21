@@ -12,6 +12,7 @@ import { authRouter, sessionMiddleware } from './auth.js';
 import { marketScanRouter } from './finance/market-scan.js';
 import { dailySummaryRouter } from './finance/daily-summary.js';
 import { bootstrapLiveUniverse } from './finance/bootstrap-live-universe.js';
+import { startFreeDashboardRefresh } from './finance/news/background.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -59,5 +60,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`AI A-Share Research API listening on http://0.0.0.0:${PORT}`);
   const tasks = startScheduler();
   if (tasks.length) console.log(`Production scheduler started with ${tasks.length} jobs`);
+  if(process.env.DATABASE_URL&&process.env.SCHEDULER_ENABLED!=='true')startFreeDashboardRefresh();
   if(process.env.DATABASE_URL&&process.env.LIVE_UNIVERSE_BOOTSTRAP!=='false')setTimeout(()=>bootstrapLiveUniverse().then(result=>console.log('Live universe bootstrap completed',result)).catch(error=>console.error('Live universe bootstrap failed',{message:error.message})),5000);
 });
