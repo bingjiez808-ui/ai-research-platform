@@ -19,7 +19,9 @@ services:
     # Render 会先自动执行 npm install，再执行 buildCommand
     # NODE_ENV=production makes npm omit devDependencies by default, while the
     # frontend compiler (Vite) intentionally lives in devDependencies.
-    buildCommand: npm ci --include=dev && npm run build
+    # Prisma only needs a syntactically valid URL while generating the client;
+    # runtime database access still requires a real DATABASE_URL in Render.
+    buildCommand: npm ci --include=dev && DATABASE_URL=postgresql://preview:preview@localhost:5432/preview npm run db:generate && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
