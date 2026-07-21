@@ -17,10 +17,10 @@ export function useApi(loader, deps = []) {
   return { ...state, retry: () => setRevision(value => value + 1) };
 }
 
-export function DataState({ loading, error, empty, retry, label = 'market intelligence', children }) {
-  if (loading) return <div className="state"><span className="loader"/><strong>Loading {label}</strong><small>Requesting live API data. No fallback data is shown.</small></div>;
-  if (error) return <div className="state error"><span className="state-code">DATA FAILURE</span><strong>{error.message}</strong><small>The upstream response could not be verified. Existing values are not substituted.</small><button onClick={retry}>Retry request</button></div>;
-  if (empty) return <div className="state"><span className="state-code">EMPTY RESPONSE</span><strong>No records returned</strong><small>The source responded successfully, but has no data for this view or filter.</small></div>;
+export function DataState({ loading, error, empty, retry, label = '数据', children }) {
+  if (loading) return <div className="state"><span className="loader"/><strong>正在加载{label}</strong><small>正在请求真实接口，不展示替代或模拟数据。</small></div>;
+  if (error) return <div className="state error"><span className="state-code">数据加载失败</span><strong>{error.message}</strong><small>无法验证上游响应，未使用旧值或模拟值替代。</small><button onClick={retry}>重新请求</button></div>;
+  if (empty) return <div className="state"><span className="state-code">暂无数据</span><strong>接口未返回记录</strong><small>数据源响应成功，但当前视图或筛选条件下没有数据。</small></div>;
   return children;
 }
 
@@ -29,7 +29,7 @@ export function Panel({ title, kicker, action, children, className = '' }) {
 }
 
 export function Provenance({ source, updatedAt }) {
-  return <div className="provenance"><span><b>SOURCE</b> {source || 'Not reported by API'}</span><span><b>FRESHNESS</b> {updatedAt ? new Date(updatedAt).toLocaleString('zh-CN', { hour12: false }) : 'Not reported by API'}</span></div>;
+  return <div className="provenance"><span><b>来源</b> {source || '接口未声明'}</span><span><b>更新时间</b> {updatedAt ? new Date(updatedAt).toLocaleString('zh-CN', { hour12: false }) : '接口未声明'}</span></div>;
 }
 
 export const num = (value, digits = 2) => value === null || value === undefined || value === '' || Number.isNaN(Number(value)) ? '—' : Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits }).format(Number(value));
@@ -38,10 +38,10 @@ export const tone = value => Number(value) > 0 ? 'up' : Number(value) < 0 ? 'dow
 
 export function Sparkline({ values = [], positive = true }) {
   const clean = values.map(Number).filter(Number.isFinite);
-  if (clean.length < 2) return <div className="chart-empty">Insufficient time-series data</div>;
+  if (clean.length < 2) return <div className="chart-empty">时间序列数据不足</div>;
   const min = Math.min(...clean), max = Math.max(...clean), spread = max - min || 1;
   const points = clean.map((v, i) => `${(i / (clean.length - 1)) * 100},${38 - ((v - min) / spread) * 34}`).join(' ');
-  return <svg className={`spark ${positive ? 'positive' : 'negative'}`} viewBox="0 0 100 42" preserveAspectRatio="none" aria-label="Price trend"><line x1="0" y1="38" x2="100" y2="38"/><polyline points={points}/></svg>;
+  return <svg className={`spark ${positive ? 'positive' : 'negative'}`} viewBox="0 0 100 42" preserveAspectRatio="none" aria-label="价格趋势"><line x1="0" y1="38" x2="100" y2="38"/><polyline points={points}/></svg>;
 }
 
 export function PriceTrendChart({ items = [] }) {

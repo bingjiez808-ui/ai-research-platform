@@ -195,9 +195,80 @@ model Stock {
   eventImpacts EventImpact[]
   topListEntries DragonTigerEntry[]
   portfolioHoldings PortfolioHolding[]
+  watchlistEntries UserWatchlistStock[]
+  dailyAgentReports DailyAgentReport[]
 
   @@index([market, status])
   @@map("stocks")
+}
+
+model UserWatchlistStock {
+  id        BigInt   @id @default(autoincrement())
+  ownerKey  String   @map("owner_key")
+  stockId   BigInt   @map("stock_id")
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([ownerKey, stockId])
+  @@index([ownerKey, createdAt(sort: Desc)])
+  @@map("user_watchlist_stocks")
+}
+
+model DailyAgentRun {
+  id           BigInt   @id @default(autoincrement())
+  ownerKey     String   @map("owner_key")
+  runDate      DateTime @map("run_date") @db.Date
+  trigger      String   @default("manual")
+  status       String   @default("running")
+  startedAt    DateTime @default(now()) @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  sourceStatus Json     @default("[]") @map("source_status")
+  error        String?
+  reports      DailyAgentReport[]
+
+  @@unique([ownerKey, runDate])
+  @@index([runDate(sort: Desc), status])
+  @@map("daily_agent_runs")
+}
+
+model DailyAgentReport {
+  id             BigInt   @id @default(autoincrement())
+  runId          BigInt   @map("run_id")
+  run            DailyAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stockId        BigInt?  @map("stock_id")
+  stock          Stock?   @relation(fields: [stockId], references: [id], onDelete: SetNull)
+  reportType     String   @default("stock") @map("report_type")
+  title          String
+  summary        String
+  recommendation String?
+  confidence     Decimal? @db.Decimal(6,4)
+  content        Json
+  sources        Json     @default("[]")
+  generatedAt    DateTime @default(now()) @map("generated_at")
+
+  @@index([runId, generatedAt(sort: Desc)])
+  @@index([stockId, generatedAt(sort: Desc)])
+  @@map("daily_agent_reports")
+}
+
+model MajorFinancialEvent {
+  id            BigInt   @id @default(autoincrement())
+  canonicalKey  String   @unique @map("canonical_key")
+  category      String
+  title         String
+  summary       String?
+  publishedAt   DateTime @map("published_at")
+  sourceName    String   @map("source_name")
+  sourceUrl     String   @map("source_url")
+  articleUrl    String   @map("article_url")
+  fetchedAt     DateTime @default(now()) @map("fetched_at")
+  retrievalStatus String @default("live") @map("retrieval_status")
+  raw           Json     @default("{}")
+
+  @@index([publishedAt(sort: Desc), category])
+  @@map("major_financial_events")
 }
 
 model Portfolio {

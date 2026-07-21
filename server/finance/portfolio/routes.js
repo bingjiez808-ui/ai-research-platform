@@ -7,7 +7,7 @@ import { confirmImport, createImportPreview, excelFileFilter, IMPORT_LIMITS } fr
 
 export const portfolioRouter = Router();
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_LIMITS.fileBytes, files: 1, fields: 0 }, fileFilter: excelFileFilter });
-const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 0 } });
+const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 0 }, fileFilter: (_req,file,done) => done(file.mimetype.startsWith('image/') ? null : Object.assign(new Error('Only image screenshots are accepted'),{status:415,code:'INVALID_IMAGE_TYPE'}), file.mimetype.startsWith('image/')) });
 const uploadExcel = (req,res,next) => excelUpload.single('file')(req,res,error => {
   if (error?.code === 'LIMIT_FILE_SIZE') return next(Object.assign(new Error(`Excel file exceeds ${IMPORT_LIMITS.fileBytes} bytes`),{status:413,code:'FILE_TOO_LARGE'}));
   next(error);
@@ -75,10 +75,10 @@ portfolioRouter.post('/portfolios/:id/ocr', imageUpload.single('image'), async (
     log=await db.portfolioImport.create({data:{portfolioId:BigInt(req.params.id),importType:'ocr',importUser:owner,fileName:req.file.originalname,fileSize:req.file.size,mimeType:req.file.mimetype,status:'running'}});
     const image=`data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
     const {data}=await axios.post(process.env.OCR_API_URL,{model:process.env.OCR_MODEL||'gpt-4.1-mini',messages:[{role:'system',content:'Extract A-share portfolio holdings. Return strict JSON: {"holdings":[{"stockCode":"000001","shares":100,"costPrice":10.5}]}. Do not infer unreadable values.'},{role:'user',content:[{type:'text',text:'Extract holdings from this screenshot.'},{type:'image_url',image_url:{url:image}}]}],response_format:{type:'json_object'}},{headers:{Authorization:`Bearer ${process.env.OCR_API_KEY}`},timeout:Number(process.env.OCR_TIMEOUT_MS||60000)});
-    const payload=JSON.parse(data.choices?.[0]?.message?.content),rows=payload.holdings||[],results=[];
+    const content=data.choices?.[0]?.message?.content;if(!content)throw Object.assign(new Error('OCR provider returned no structured content'),{status:502,code:'OCR_INVALID_RESPONSE'});const payload=JSON.parse(content),rows=Array.isArray(payload.holdings)?payload.holdings:[],results=[];
     for(const row of rows)try{results.push({ok:true,id:String((await upsertHolding(req.params.id,owner,row,'ocr')).id),stockCode:row.stockCode});}catch(error){results.push({ok:false,stockCode:row.stockCode,error:error.message});}
     await db.portfolioImport.update({where:{id:log.id},data:{status:'succeeded',rowsRead:rows.length,rowsWritten:results.filter(result=>result.ok).length,validationResult:{valid:results.every(result=>result.ok)},result:{results,usage:data.usage||null},finishedAt:new Date()}});
-    res.json({success:true,data:{rowsRead:rows.length,rowsWritten:results.filter(result=>result.ok).length,results,provider:process.env.OCR_MODEL||'configured-vision-model'}});
+    res.json({success:true,data:{rowsRead:rows.length,rowsWritten:results.filter(result=>result.ok).length,results,provider:process.env.OCR_MODEL||'configured-vision-model'},meta:{source:process.env.OCR_API_URL,url:process.env.OCR_API_URL,fetchedAt:new Date(),status:'live',mock:false}});
   } catch(error) {
     if(log)await db.portfolioImport.update({where:{id:log.id},data:{status:'failed',error:error.message,finishedAt:new Date()}}).catch(()=>{});
     next(error);
