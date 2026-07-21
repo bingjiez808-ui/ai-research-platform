@@ -10,6 +10,7 @@ import { fetchPriceHistory } from './adapters/eastmoney.js';
 import { TushareProvider } from './providers/tushare.js';
 import { collectMajorEvents, listMajorEvents } from './events/collector.js';
 import { getStockQuote, getStockQuotes, getTencentPriceHistory } from '../market.js';
+import { getSinaFinancials } from './providers/sina-financials.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -22,7 +23,7 @@ financeRouter.get('/stocks', async (req, res, next) => { try {
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code', async (req,res,next)=>{try{
-  const code=cleanCode(req.params.code),stock=await getPrisma().stock.findUnique({where:{code},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); const realtimeQuote=await getStockQuote(code);res.json({success:true,data:{...stock,realtimeQuote},meta:{...meta(realtimeQuote?'腾讯实时行情 + PostgreSQL':'PostgreSQL缓存行情'),realtime:!!realtimeQuote}});
+  const code=cleanCode(req.params.code),stock=await getPrisma().stock.findUnique({where:{code},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); const [realtimeQuote,liveFinancials]=await Promise.all([getStockQuote(code),stock.statements.length>=4?Promise.resolve([]):getSinaFinancials(code).catch(()=>[])]),statements=stock.statements.length>=4?stock.statements:liveFinancials;res.json({success:true,data:{...stock,statements,realtimeQuote,fundamentalCoverage:{periods:statements.length,source:liveFinancials.length?'新浪财经财报三表':'PostgreSQL财务库',liveFallback:Boolean(liveFinancials.length)}},meta:{...meta(realtimeQuote?'腾讯实时行情 + 财务数据':'PostgreSQL缓存行情 + 财务数据'),realtime:!!realtimeQuote}});
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
