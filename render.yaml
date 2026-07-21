@@ -57,7 +57,9 @@ services:
       - key: CNINFO_ENABLED
         value: "true"
       - key: TUSHARE_WORKER_URL
-        value: http://tushare-sdk-worker:10000
+        # Blueprint adds a workspace suffix to the deployed service name, so
+        # the unsuffixed private hostname cannot be resolved by the Node app.
+        value: https://tushare-sdk-worker-1505.onrender.com
       - key: TUSHARE_ALLOW_DIRECT_FALLBACK
         value: "false"
       - key: FINANCE_LLM_PROVIDER
