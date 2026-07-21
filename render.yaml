@@ -20,6 +20,10 @@ services:
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # Render currently defaults new services to Python 3.14. Pin a version
+      # with prebuilt pandas wheels so deploys do not stall compiling pandas.
+      - key: PYTHON_VERSION
+        value: "3.13.4"
       - key: TUSHARE_HTTP_URL
         value: https://fastapic.stockai888.top
       - key: TUSHARE_CALLS_PER_MINUTE
