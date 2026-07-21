@@ -1,5 +1,5 @@
 /* eslint-disable react/only-export-components -- shared hooks/formatters intentionally colocated with UI primitives */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export function useApi(loader, deps = []) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
@@ -45,13 +45,14 @@ export function Sparkline({ values = [], positive = true }) {
 }
 
 export function PriceTrendChart({ items = [] }) {
-  const rows = items.filter(item => Number.isFinite(Number(item.close)));
-  if (rows.length < 2) return <div className="chart-empty">暂无足够的真实历史行情</div>;
-  const width=900,height=280,pad=30, values=rows.map(item=>Number(item.close));
-  const min=Math.min(...values),max=Math.max(...values),spread=max-min||1;
-  const x=index=>pad+(index/(rows.length-1))*(width-pad*2), y=value=>height-pad-((value-min)/spread)*(height-pad*2);
-  const line=rows.map((item,index)=>`${index?'L':'M'}${x(index).toFixed(1)},${y(Number(item.close)).toFixed(1)}`).join(' ');
-  const area=`${line} L${x(rows.length-1)},${height-pad} L${x(0)},${height-pad} Z`;
-  const positive=values.at(-1)>=values[0];
-  return <div className={`price-chart ${positive?'positive':'negative'}`}><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="真实股价历史趋势图"><defs><linearGradient id="priceArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".28"/><stop offset="1" stopColor="currentColor" stopOpacity="0"/></linearGradient></defs><path className="area" d={area}/><path className="line" d={line}/></svg><div className="chart-axis"><span>{rows[0].tradeDate}</span><b>{min.toFixed(2)} — {max.toFixed(2)}</b><span>{rows.at(-1).tradeDate}</span></div></div>;
+  const all=useMemo(()=>items.filter(item=>Number.isFinite(Number(item.close))).slice().sort((a,b)=>String(a.tradeDate??a.date).localeCompare(String(b.tradeDate??b.date))),[items]);
+  const [range,setRange]=useState('120'),[zoom,setZoom]=useState(1),[hover,setHover]=useState(null);const svgRef=useRef(null);
+  const ranged=range==='all'?all:all.slice(-Number(range));const count=Math.max(2,Math.ceil(ranged.length/zoom)),rows=ranged.slice(-count);
+  if(all.length<2)return <div className="chart-empty">暂无足够的真实历史行情</div>;
+  const width=900,height=300,pad=38, highs=rows.map(x=>Number(x.high??x.close)),lows=rows.map(x=>Number(x.low??x.close));
+  const min=Math.min(...lows),max=Math.max(...highs),spread=max-min||1,x=i=>pad+(i/(rows.length-1))*(width-pad*2),y=v=>height-pad-((Number(v)-min)/spread)*(height-pad*2);
+  const closePath=rows.map((r,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(r.close).toFixed(1)}`).join(' '),positive=Number(rows.at(-1).close)>=Number(rows[0].close);
+  const locate=event=>{const rect=svgRef.current?.getBoundingClientRect();if(!rect)return;const point=event.touches?.[0]||event;const ratio=Math.max(0,Math.min(1,(point.clientX-rect.left)/rect.width));setHover(Math.round(ratio*(rows.length-1)))};
+  const active=hover==null?null:rows[hover],previous=hover>0?Number(rows[hover-1].close):Number(active?.open),change=active&&previous?(Number(active.close)-previous)/previous*100:null;
+  return <div className={`price-chart interactive ${positive?'positive':'negative'}`}><div className="chart-tools"><div>{[['20','1月'],['60','3月'],['120','6月'],['250','1年'],['all','全部']].map(([key,label])=><button className={range===key?'active':''} onClick={()=>{setRange(key);setZoom(1)}} key={key}>{label}</button>)}</div><div><button onClick={()=>setZoom(z=>Math.max(1,z/1.5))} aria-label="缩小">−</button><span>{zoom.toFixed(1)}×</span><button onClick={()=>setZoom(z=>Math.min(8,z*1.5))} aria-label="放大">＋</button></div></div><div className="chart-stage"><svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="可交互真实股价历史趋势图" onMouseMove={locate} onMouseLeave={()=>setHover(null)} onTouchStart={locate} onTouchMove={locate}><defs><linearGradient id="priceArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".25"/><stop offset="1" stopColor="currentColor" stopOpacity="0"/></linearGradient></defs><path className="area" d={`${closePath} L${x(rows.length-1)},${height-pad} L${x(0)},${height-pad} Z`}/><path className="line" d={closePath}/>{active&&<g className="crosshair"><line x1={x(hover)} y1={pad} x2={x(hover)} y2={height-pad}/><line x1={pad} y1={y(active.close)} x2={width-pad} y2={y(active.close)}/><circle cx={x(hover)} cy={y(active.close)} r="5"/></g>}</svg>{active&&<div className="chart-tooltip" style={{left:`${Math.min(72,Math.max(3,hover/(rows.length-1)*100))}%`}}><b>{active.tradeDate??active.date}</b><span>开 {num(active.open)}　高 {num(active.high)}</span><span>低 {num(active.low)}　收 {num(active.close)}</span><span className={tone(change)}>涨跌 {pct(change)}</span><span>成交量 {num(active.volume,0)}</span></div>}</div><div className="chart-axis"><span>{rows[0].tradeDate??rows[0].date}</span><b>{min.toFixed(2)} — {max.toFixed(2)} · {rows.length} 个交易日</b><span>{rows.at(-1).tradeDate??rows.at(-1).date}</span></div></div>;
 }

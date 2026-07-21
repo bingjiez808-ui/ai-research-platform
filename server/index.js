@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { financeRouter } from './finance/routes.js';
 import { portfolioRouter } from './finance/portfolio/routes.js';
 import { experienceRouter } from './finance/experience/routes.js';
+import { marketDashboardRouter } from './finance/market-dashboard.js';
 import { startScheduler } from './scheduler/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +22,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api', financeRouter);
 app.use('/api', portfolioRouter);
 app.use('/api', experienceRouter);
+app.use('/api', marketDashboardRouter);
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'ai-a-share-research', time: new Date().toISOString() });
 });
