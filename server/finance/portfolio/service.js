@@ -1,9 +1,8 @@
 import { getPrisma } from '../../research/prisma.js';
 import { cleanCode, marketFor } from '../normalize.js';
 
-// Namespaced identities prevent an anonymous header from ever colliding with a user id.
-// Once authenticated, the cookie identity always wins over X-Owner-Key.
-export const ownerKey = req => { if(req.user?.id)return `user:${req.user.id}`;const key=String(req.get('x-owner-key')||'').trim();if(!key)throw Object.assign(new Error('请先登录'),{status:401,code:'OWNER_REQUIRED'});return `anon:${key.slice(0,123)}`; };
+// Portfolio state is available only to a verified server-side login session.
+export const ownerKey = req => { if(req.user?.id)return `user:${req.user.id}`;throw Object.assign(new Error('请先登录'),{status:401,code:'UNAUTHENTICATED'}); };
 export async function assertWatchlisted(owner,codes,db=getPrisma()){const wanted=[...new Set(codes.map(cleanCode))],rows=await db.userWatchlistStock.findMany({where:{ownerKey:owner,stock:{code:{in:wanted}}},select:{stock:{select:{code:true}}}}),allowed=new Set(rows.map(row=>row.stock.code)),missing=wanted.filter(code=>!allowed.has(code));if(missing.length)throw Object.assign(new Error(`组合只能使用当前账户自选股：${missing.join('、')}`),{status:422,code:'STOCK_NOT_WATCHLISTED',missing});}
 const n=value=>Number(value||0);
 export async function getPortfolio(id,owner){const db=getPrisma();const portfolio=await db.portfolio.findFirst({where:{id:BigInt(id),ownerKey:owner},include:{holdings:{include:{stock:{include:{industry:true,prices:{take:1,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:1,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:5,orderBy:{publishedAt:'desc'},include:{source:true}}}}}}}});if(!portfolio)throw Object.assign(new Error('Portfolio not found'),{status:404,code:'PORTFOLIO_NOT_FOUND'});return portfolio;}
