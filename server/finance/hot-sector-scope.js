@@ -14,8 +14,8 @@ const ALIASES={
 };
 
 export function sectorAliases(name){return ALIASES[name]||[name];}
-export function stockMatchesSector(stock,sector){const industry=stock.industry?.name||stock.industry||'',codes=new Set((sector.leaders||[]).map(item=>item.code));return codes.has(stock.code)||sectorAliases(sector.name).some(alias=>industry.includes(alias));}
+export function stockMatchesSector(stock,sector){const industry=stock.industry?.name||stock.industry||'';return sectorAliases(sector.name).some(alias=>industry.includes(alias));}
 export async function getTopSectorScope(limit=3){
-  const hot=await getHotSectorRecommendations({limit:Math.max(limit,5)}),sectors=hot.items.filter(item=>item.score!=null).slice(0,limit),leaderCodes=[...new Set(sectors.flatMap(item=>(item.leaders||[]).map(stock=>stock.code)))],aliases=[...new Set(sectors.flatMap(item=>sectorAliases(item.name)))],where=sectors.length?{OR:[...(leaderCodes.length?[{code:{in:leaderCodes}}]:[]),...aliases.map(name=>({industry:{name:{contains:name}}}))]}:{id:{equals:-1n}};
+  const hot=await getHotSectorRecommendations({limit:Math.max(limit,5)}),sectors=hot.items.filter(item=>item.score!=null).slice(0,limit),leaderCodes=[...new Set(sectors.flatMap(item=>(item.leaders||[]).map(stock=>stock.code)))],aliases=[...new Set(sectors.flatMap(item=>sectorAliases(item.name)))],where=sectors.length?{OR:aliases.map(name=>({industry:{name:{contains:name}}}))}:{id:{equals:-1n}};
   return{sectors,where,aliases,leaderCodes,metadata:sectors.map((sector,index)=>({rank:index+1,name:sector.name,score:sector.score,recommendation:sector.recommendation,linkedStocks:sector.metrics?.linkedStocks??0,evidenceCompleteness:sector.evidenceCompleteness}))};
 }
