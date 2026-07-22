@@ -11,6 +11,7 @@ import { TushareProvider } from './providers/tushare.js';
 import { collectMajorEvents, listMajorEvents } from './events/collector.js';
 import { getStockQuote, getStockQuotes, getTencentPriceHistory } from '../market.js';
 import { getSinaFinancials } from './providers/sina-financials.js';
+import { requireAdminToken } from '../security.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -77,4 +78,4 @@ financeRouter.get('/news/clusters', async(req,res,next)=>{try{const data=await g
 financeRouter.get('/events/impacts', async(req,res,next)=>{try{const where=req.query.code?{stock:{code:cleanCode(req.query.code)}}:{};const data=await getPrisma().eventImpact.findMany({where,take:integer(req.query.limit,50,200),orderBy:{calculatedAt:'desc'},include:{event:true,stock:{select:{code:true,name:true}}}});res.json({success:true,data,meta:meta('event-window-v1')});}catch(e){next(e);}});
 
 financeRouter.get('/events/major',async(req,res,next)=>{try{if(!process.env.DATABASE_URL)return res.json({success:true,data:{items:[],events:[],source:[],status:'unavailable',fetchedAt:new Date(),coverage:{returned:0,note:'需配置 DATABASE_URL 后存储重大事件'}},meta:{mock:false,source:'无数据库预览模式',status:'unavailable',fetchedAt:new Date()}});const data=await listMajorEvents({limit:integer(req.query.limit,50,200),category:req.query.category?String(req.query.category):undefined});res.json({success:true,data,meta:{mock:false,source:data.source,status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage}});}catch(e){next(e);}});
-financeRouter.post('/events/major/refresh',async(req,res,next)=>{try{const configured=process.env.SCHEDULER_REFRESH_TOKEN,provided=req.get('x-scheduler-token');if(configured&&provided!==configured)return res.status(401).json({success:false,error:{code:'UNAUTHORIZED',message:'Invalid scheduler token'}});const data=await collectMajorEvents();res.json({success:true,data:{items:data.events,statuses:data.statuses},meta:{mock:false,source:data.statuses.map(x=>x.source),status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage,schedulerSafe:true,noOverlap:true}});}catch(e){next(e);}});
+financeRouter.post('/events/major/refresh',async(req,res,next)=>{try{requireAdminToken(req,'SCHEDULER_REFRESH_TOKEN','x-scheduler-token');const data=await collectMajorEvents();res.json({success:true,data:{items:data.events,statuses:data.statuses},meta:{mock:false,source:data.statuses.map(x=>x.source),status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage,schedulerSafe:true,noOverlap:true}});}catch(e){next(e);}});
