@@ -9,7 +9,9 @@ import { runTradingWorkflow } from './agents/trading-workflow.js';
 import { fetchPriceHistory } from './adapters/eastmoney.js';
 import { TushareProvider } from './providers/tushare.js';
 import { collectMajorEvents, listMajorEvents } from './events/collector.js';
-import { getStockQuote, getStockQuotes } from '../market.js';
+import { getStockQuote, getStockQuotes, getTencentPriceHistory } from '../market.js';
+import { getSinaFinancials } from './providers/sina-financials.js';
+import { requireAdminToken } from '../security.js';
 
 export const financeRouter = Router();
 const integer = (v, fallback, max=200) => Math.min(max, Math.max(1, Number.parseInt(v || fallback, 10) || fallback));
@@ -22,7 +24,7 @@ financeRouter.get('/stocks', async (req, res, next) => { try {
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code', async (req,res,next)=>{try{
-  const code=cleanCode(req.params.code),stock=await getPrisma().stock.findUnique({where:{code},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); const realtimeQuote=await getStockQuote(code);res.json({success:true,data:{...stock,realtimeQuote},meta:{...meta(realtimeQuote?'腾讯实时行情 + PostgreSQL':'PostgreSQL缓存行情'),realtime:!!realtimeQuote}});
+  const code=cleanCode(req.params.code),stock=await getPrisma().stock.findUnique({where:{code},include:{industry:true,prices:{take:120,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:12,orderBy:{periodEnd:'desc'},include:{source:true}},news:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}},reports:{take:20,orderBy:{publishedAt:'desc'},include:{source:true}}}}); if(!stock) return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Stock not found'}}); const [realtimeQuote,liveFinancials]=await Promise.all([getStockQuote(code),stock.statements.length>=4?Promise.resolve([]):getSinaFinancials(code).catch(()=>[])]),statements=stock.statements.length>=4?stock.statements:liveFinancials;res.json({success:true,data:{...stock,statements,realtimeQuote,fundamentalCoverage:{periods:statements.length,source:liveFinancials.length?'新浪财经财报三表':'PostgreSQL财务库',liveFallback:Boolean(liveFinancials.length)}},meta:{...meta(realtimeQuote?'腾讯实时行情 + 财务数据':'PostgreSQL缓存行情 + 财务数据'),realtime:!!realtimeQuote}});
 } catch(e){next(e);} });
 
 financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
@@ -36,12 +38,17 @@ financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
   }catch(error){
     liveError=error.message;
     try{
+      items=(await getTencentPriceHistory(code,limit)).slice(-limit);if(items.length<2)throw new Error('Tencent returned insufficient history');
+      const source=await db.dataSource.upsert({where:{key:'tencent'},create:{key:'tencent',name:'腾讯财经',kind:'market-data',baseUrl:'https://gu.qq.com/'},update:{enabled:true}});
+      await db.stockPrice.createMany({skipDuplicates:true,data:items.map(item=>({stockId:stock.id,tradeDate:new Date(`${item.tradeDate}T00:00:00.000Z`),interval:'1d',open:item.open,close:item.close,high:item.high,low:item.low,changePercent:item.changePercent,volume:BigInt(Math.trunc(item.volume||0)),turnover:item.turnover,sourceId:source.id,providerKey:`${code}:${item.tradeDate}`,sourceUrl:`https://gu.qq.com/${code.startsWith('6')?'sh':'sz'}${code}`,payloadHash:createHash('sha256').update(JSON.stringify(item.raw)).digest('hex'),raw:{kline:item.raw,adjustment:'forward'}}))});
+      sourceName='腾讯历史日线行情（前复权）';liveError=null;
+    }catch(tencentError){try{
       const end=new Date().toISOString().slice(0,10).replaceAll('-',''),start=new Date(Date.now()-730*86400000).toISOString().slice(0,10).replaceAll('-',''),rows=await new TushareProvider().dailyQuotes({ts_code:`${code}.${code.startsWith('6')?'SH':'SZ'}`,start_date:start,end_date:end});
       items=rows.slice(0,limit).reverse().map(row=>({tradeDate:`${row.trade_date.slice(0,4)}-${row.trade_date.slice(4,6)}-${row.trade_date.slice(6,8)}`,open:Number(row.open),close:Number(row.close),high:Number(row.high),low:Number(row.low),volume:Number(row.vol)*100,turnover:Number(row.amount)*1000,changePercent:Number(row.pct_chg),change:Number(row.change),raw:row}));
       const source=await db.dataSource.upsert({where:{key:'tushare'},create:{key:'tushare',name:'Tushare',kind:'market-data',baseUrl:'https://tushare.pro/'},update:{enabled:true}});
       await db.stockPrice.createMany({skipDuplicates:true,data:items.map(item=>({stockId:stock.id,tradeDate:new Date(`${item.tradeDate}T00:00:00.000Z`),interval:'1d',open:item.open,close:item.close,high:item.high,low:item.low,changePercent:item.changePercent,volume:BigInt(Math.trunc(item.volume)),turnover:item.turnover,sourceId:source.id,providerKey:`${code}:${item.tradeDate}`,sourceUrl:'https://tushare.pro/document/2?doc_id=27',payloadHash:createHash('sha256').update(JSON.stringify(item.raw)).digest('hex'),raw:{...item.raw,adjustment:'none'}}))});
       sourceName='Tushare 历史日线行情（未复权）';liveError=null;
-    }catch(fallbackError){liveError=`Eastmoney: ${error.message}; Tushare: ${fallbackError.message}`;}
+    }catch(fallbackError){liveError=`Eastmoney: ${error.message}; Tencent: ${tencentError.message}; Tushare: ${fallbackError.message}`;}}
   }
   if(!items.length){const cached=await db.stockPrice.findMany({where:{stockId:stock.id,interval:'1d'},take:limit,orderBy:{tradeDate:'desc'},include:{source:true}});items=cached.reverse().map(item=>({tradeDate:item.tradeDate.toISOString().slice(0,10),open:Number(item.open),close:Number(item.close),high:Number(item.high),low:Number(item.low),volume:Number(item.volume),turnover:Number(item.turnover),changePercent:Number(item.changePercent)}));}
   if(items.length<2)throw Object.assign(new Error(liveError||'Insufficient verified price history'),{status:502,code:'PRICE_HISTORY_UNAVAILABLE'});
@@ -49,7 +56,8 @@ financeRouter.get('/stocks/:code/price-history', async (req,res,next)=>{try{
 }catch(e){next(e);}});
 
 financeRouter.get('/decision/:code', async(req,res,next)=>{try{
-  res.json({success:true,data:await runTradingWorkflow(cleanCode(req.params.code)),meta:meta('PostgreSQL evidence + TradingAgents-inspired workflow')});
+  const mode=req.query.mode==='llm'?'llm':req.query.mode==='deterministic'?'deterministic':'auto';
+  res.json({success:true,data:await runTradingWorkflow(cleanCode(req.params.code),{mode}),meta:meta('PostgreSQL evidence + TradingAgents workflow')});
 }catch(e){next(e);}});
 
 financeRouter.get('/market/trend', async (req,res,next)=>{try{
@@ -69,5 +77,5 @@ financeRouter.get('/agents/:agent/:code', async(req,res,next)=>{try{const data=a
 financeRouter.get('/news/clusters', async(req,res,next)=>{try{const data=await getPrisma().newsCluster.findMany({take:integer(req.query.limit,30,100),orderBy:{lastSeenAt:'desc'},include:{members:{take:5,include:{article:{select:{id:true,title:true,publishedAt:true,url:true}}}}}});res.json({success:true,data,meta:meta('PostgreSQL news intelligence')});}catch(e){next(e);}});
 financeRouter.get('/events/impacts', async(req,res,next)=>{try{const where=req.query.code?{stock:{code:cleanCode(req.query.code)}}:{};const data=await getPrisma().eventImpact.findMany({where,take:integer(req.query.limit,50,200),orderBy:{calculatedAt:'desc'},include:{event:true,stock:{select:{code:true,name:true}}}});res.json({success:true,data,meta:meta('event-window-v1')});}catch(e){next(e);}});
 
-financeRouter.get('/events/major',async(req,res,next)=>{try{const data=await listMajorEvents({limit:integer(req.query.limit,50,200),category:req.query.category?String(req.query.category):undefined});res.json({success:true,data,meta:{mock:false,source:data.source,status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage}});}catch(e){next(e);}});
-financeRouter.post('/events/major/refresh',async(req,res,next)=>{try{const configured=process.env.SCHEDULER_REFRESH_TOKEN,provided=req.get('x-scheduler-token');if(configured&&provided!==configured)return res.status(401).json({success:false,error:{code:'UNAUTHORIZED',message:'Invalid scheduler token'}});const data=await collectMajorEvents();res.json({success:true,data:{items:data.events,statuses:data.statuses},meta:{mock:false,source:data.statuses.map(x=>x.source),status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage,schedulerSafe:true,noOverlap:true}});}catch(e){next(e);}});
+financeRouter.get('/events/major',async(req,res,next)=>{try{if(!process.env.DATABASE_URL)return res.json({success:true,data:{items:[],events:[],source:[],status:'unavailable',fetchedAt:new Date(),coverage:{returned:0,note:'需配置 DATABASE_URL 后存储重大事件'}},meta:{mock:false,source:'无数据库预览模式',status:'unavailable',fetchedAt:new Date()}});const data=await listMajorEvents({limit:integer(req.query.limit,50,200),category:req.query.category?String(req.query.category):undefined});res.json({success:true,data,meta:{mock:false,source:data.source,status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage}});}catch(e){next(e);}});
+financeRouter.post('/events/major/refresh',async(req,res,next)=>{try{requireAdminToken(req,'SCHEDULER_REFRESH_TOKEN','x-scheduler-token');const data=await collectMajorEvents();res.json({success:true,data:{items:data.events,statuses:data.statuses},meta:{mock:false,source:data.statuses.map(x=>x.source),status:data.status,fetchedAt:data.fetchedAt,coverage:data.coverage,schedulerSafe:true,noOverlap:true}});}catch(e){next(e);}});

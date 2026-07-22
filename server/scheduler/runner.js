@@ -3,6 +3,7 @@ import { getPrisma } from '../research/prisma.js';
 import { ingestMarketIndicators, ingestQuotes, ingestStockDocuments } from '../finance/ingestion.js';
 import { processNews } from '../finance/news/pipeline.js';
 import { collectLicensedNews } from '../finance/news/sources.js';
+import { collectMajorEvents } from '../finance/events/collector.js';
 import { calculateEventImpacts } from '../finance/events/impact.js';
 import { runProductionAgent } from '../finance/agents/production.js';
 import { TushareProvider } from '../finance/providers/tushare.js';
@@ -29,6 +30,7 @@ export async function runScheduledJob(jobName,{maxAttempts=3}={}) {
       else if(jobName==='stock-basic-weekly') result={tushare:await ingestTushareBasic()};
       else if(jobName==='financial-weekly') {const codes=(process.env.TUSHARE_WATCHLIST||'').split(',').filter(Boolean);const financials=[];for(const code of codes)financials.push(await ingestTushareFinancials(code.trim()));result={financials};}
       else if(jobName==='market-open') result={quotes:await ingestQuotes(),indicators:await ingestMarketIndicators()};
+      else if(jobName==='free-news-refresh') {const collection=await collectLicensedNews();const news=await processNews();const majorEvents=await collectMajorEvents();result={collection,news,majorEvents:{status:majorEvents.status,coverage:majorEvents.coverage}};}
       else if(jobName==='market-close') {const day=shanghaiDate();if(!await isTradingDay(day))result={skipped:true,reason:'exchange-closed',tradeDate:day};else result={quotes:await ingestQuotes(),indicators:await ingestMarketIndicators(),tushare:tushare.isConfigured()?await ingestTushareDaily(day):{skipped:true,reason:'not-configured'}};}
       else if(jobName==='nightly') { const day=shanghaiDate();if(!await isTradingDay(day))result={skipped:true,reason:'exchange-closed',tradeDate:day};else{const codes=(process.env.FINANCE_WATCHLIST||'').split(',').filter(Boolean); const documents=[]; for(const code of codes) documents.push(await ingestStockDocuments(code.trim())); const collection=await collectLicensedNews(); const news=await processNews(); const impacts=await calculateEventImpacts(); const analyses=[]; for(const code of codes) for(const agent of ['research','market','risk']) analyses.push(String((await runProductionAgent(agent,code.trim())).id)); result={documents,collection,news,impacts,analyses};}}
       else throw new Error(`Unknown scheduled job ${jobName}`);

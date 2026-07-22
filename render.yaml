@@ -11,16 +11,64 @@
 
 services:
   - type: web
+    name: tushare-sdk-worker
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: workers/tushare
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Render currently defaults new services to Python 3.14. Pin a version
+      # with prebuilt pandas wheels so deploys do not stall compiling pandas.
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: TUSHARE_HTTP_URL
+        value: https://fastapic.stockai888.top
+      - key: TUSHARE_CALLS_PER_MINUTE
+        value: "90"
+
+  - type: web
     name: ai-research-platform
     runtime: node
     plan: free
     region: oregon
     # 不写死 branch：Render 会自动使用所连仓库的默认分支（main/master 等）
     # Render 会先自动执行 npm install，再执行 buildCommand
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    # NODE_ENV=production makes npm omit devDependencies by default, while the
+    # frontend compiler (Vite) intentionally lives in devDependencies.
+    # Prisma only needs a syntactically valid URL while generating the client;
+    # runtime database access still requires a real DATABASE_URL in Render.
+    buildCommand: npm ci --include=dev && DATABASE_URL=postgresql://preview:preview@localhost:5432/preview npm run db:generate && npm run build
+    # Apply checked-in migrations before accepting traffic. This is idempotent
+    # and uses DIRECT_URL when configured, otherwise DATABASE_URL.
+    startCommand: npm run db:migrate && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
-      # 如需外部 API 密钥/代理等，在此添加；当前应用无必需密钥。
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: CLS_FREE_NEWS_ENABLED
+        value: "true"
+      - key: SINA_FREE_NEWS_ENABLED
+        value: "true"
+      - key: CNINFO_ENABLED
+        value: "true"
+      - key: TUSHARE_WORKER_URL
+        # Blueprint adds a workspace suffix to the deployed service name, so
+        # the unsuffixed private hostname cannot be resolved by the Node app.
+        value: https://tushare-sdk-worker-1505.onrender.com
+      - key: TUSHARE_ALLOW_DIRECT_FALLBACK
+        value: "false"
+      - key: FINANCE_LLM_PROVIDER
+        value: deepseek
+      - key: FINANCE_LLM_BASE_URL
+        value: https://api.deepseek.com
+      - key: FINANCE_LLM_MODEL
+        value: deepseek-v4-flash
+      # DeepSeek 密钥只在 Render 控制台添加，不提交到 GitHub：
+      # FINANCE_LLM_BASE_URL=https://api.deepseek.com
+      # FINANCE_LLM_MODEL=deepseek-v4-flash
+      # FINANCE_LLM_API_KEY=<Render secret>

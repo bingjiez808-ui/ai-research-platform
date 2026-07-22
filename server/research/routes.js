@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from './db.js';
 import { ingest } from './ingest.js';
+import { requireAdminToken } from '../security.js';
 
 export const researchRouter = express.Router();
 const paging = q => ({ limit: Math.min(Math.max(Number(q.limit) || 20, 1), 100), offset: Math.max(Number(q.offset) || 0, 0) });
@@ -53,7 +54,7 @@ researchRouter.get('/models', async (req, res, next) => {
 });
 
 researchRouter.post('/ingest/:provider', async (req, res, next) => {
-  try { res.status(202).json({ data: await ingest(req.params.provider, req.body || {}) }); } catch (error) { next(error); }
+  try { requireAdminToken(req, 'RESEARCH_INGEST_TOKEN'); res.status(202).json({ data: await ingest(req.params.provider, req.body || {}) }); } catch (error) { next(error); }
 });
 
 researchRouter.get('/provenance/:type/:id', async (req, res, next) => {

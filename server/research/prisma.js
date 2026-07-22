@@ -1,5 +1,10 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '@prisma/client';
+// Prisma's generated package is CommonJS on some production installs. Using
+// the default export keeps this ESM server compatible with both CJS and ESM
+// client layouts.
+import prismaPackage from '@prisma/client';
+
+const { PrismaClient } = prismaPackage;
 
 const globalForPrisma = globalThis;
 
