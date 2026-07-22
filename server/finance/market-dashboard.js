@@ -9,6 +9,7 @@ import { getHotSectorRecommendations } from './hot-sectors.js';
 import { getNewsIntelligence } from './news-intelligence.js';
 import { evaluateStrategy } from './strategy-evaluator.js';
 import { buildRecommendationSummary, buildTradePlan, decisionLabel, weightedScore } from './trade-plan.js';
+import { getInStockSelection } from './providers/instock.js';
 
 export const marketDashboardRouter = Router();
 const asNumber = value => value == null ? null : Number(value);
@@ -31,6 +32,7 @@ marketDashboardRouter.get('/market/dashboard', async (_req, res, next) => { try 
 
 marketDashboardRouter.get('/market/hot-sectors',async(_req,res,next)=>{try{const data=await getHotSectorRecommendations();res.json({success:true,data,meta:{source:['新浪财经 7×24','财联社免费电报','巨潮公告','PostgreSQL关联A股行情'],status:data.items.some(item=>item.score!=null)?'live':'insufficient-evidence',mock:false,updatedAt:data.asOf,coverage:data.coverage}});}catch(error){next(error);}});
 marketDashboardRouter.get('/market/news-intelligence',async(_req,res,next)=>{try{const data=await getNewsIntelligence();res.json({success:true,data,meta:{source:['已入库今日新闻','关联A股行情','透明量化关注度模型'],status:data.keywords.length?'live':'insufficient-evidence',mock:false,updatedAt:data.asOf,coverage:data.coverage}});}catch(error){next(error);}});
+marketDashboardRouter.get('/market/selection-lab',async(req,res,next)=>{try{const data=await getInStockSelection({date:req.query.date?String(req.query.date):undefined,limit:Math.min(100,Math.max(10,Number(req.query.limit)||50))});res.json({success:true,data,meta:{source:data.source,status:data.status,mock:false,updatedAt:new Date(),dataAsOf:data.dataDate,coverage:data.coverage,warning:data.reason}});}catch(error){next(error);}});
 marketDashboardRouter.post('/strategies/evaluate',async(req,res,next)=>{try{const data=await evaluateStrategy(req.body||{});res.json({success:true,data,meta:{source:'PostgreSQL真实行情与财务数据',status:data.items.length?'live':'insufficient-evidence',mock:false,updatedAt:data.asOf,coverage:data.coverage}});}catch(error){next(error);}});
 
 marketDashboardRouter.get('/market/ai-summary', async (_req, res, next) => { try {
