@@ -17,6 +17,7 @@ const NAV = [
   ["command", "⌁", "投研首页", "今日市场与组合风险"],
   ["agent", "✦", "每日投研 Agent", "关注列表、自动工作流与早报"],
   ["portfolio", "◇", "投资组合", "持仓、收益与风险"],
+  ["selection", "⌗", "AI 选股实验室", "全市场因子审计与候选"],
   ["stocks", "◎", "个股研究", "公司与 AI 投资报告"],
 ];
 const stockCode = (s) => s?.code ?? s?.stockCode ?? s?.symbol;
@@ -1420,6 +1421,29 @@ function StrategyLab() {
   return <Section eyebrow="策略 API · 每日匹配" title="让 AI 找到最接近你规则的股票" className="strategy-lab">
     <div className="strategy-layout"><div className="strategy-form"><label>策略名称<input value={form.name} onChange={e => setForm({...form,name:e.target.value})}/></label><div className="strategy-fields">{[["minRoe","ROE ≥","%"],["maxPe","PE ≤","倍"],["maxPb","PB ≤","倍"],["minMarketCapYi","市值 ≥","亿元"],["maxChangePercent","当日涨幅 ≤","%"],["minTurnoverRate","换手率 ≥","%"]].map(([key,label,unit])=><label key={key}>{label}<div><input type="number" step="any" value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/><small>{unit}</small></div></label>)}</div><label>限定行业（可选，逗号分隔）<input value={form.industries} onChange={e=>setForm({...form,industries:e.target.value})} placeholder="半导体、医药生物"/></label><button className="primary" disabled={busy} onClick={run}>{busy?"正在扫描真实股票库…":"运行策略并生成每日候选"}</button>{error&&<p className="form-error">{error}</p>}<p className="api-contract">接口：POST /api/strategies/evaluate · 仅接收声明式规则，不执行用户脚本。</p></div><div className="strategy-results">{data?<><header><div><b>今日最接近策略的股票</b><small>扫描 {data.coverage?.evaluated || 0} 只 · {cnTime(data.asOf)}</small></div><Badge toneName="blue">规则距离排序</Badge></header>{data.items?.map((item,index)=><article key={item.code}><i>{index+1}</i><div><b>{item.name} <small>{item.code} · {item.industry}</small></b><p>{item.gaps?.filter(g=>g.status!=="pass").slice(0,2).map(g=>g.status==="missing"?`${g.label}缺失`:`${g.label}差 ${g.gap}`).join("；")||"所有已配置规则均通过"}</p></div><strong>{item.matchScore}<small>匹配度</small></strong></article>)}<footer>{data.optimization?.suggestions?.join(" ")}<br/>{data.disclosure}</footer></>:<Empty title="等待运行策略" copy="系统会按规则距离与数据完整度排序，返回最接近而不是虚构“必涨”的股票。"/>}</div></div>
   </Section>;
+}
+
+function SelectionLab({ onStock }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [revision, setRevision] = useState(0);
+  const result = useApi((signal) => api.selectionLab({ date, limit: 50 }, signal), [date, revision]);
+  const data = result.data?.data || {}, items = data.items || [], coverage = data.coverage || {};
+  const factorLabels = { quality: "基本面质量", growthValuation: "成长与估值", technical: "技术触发", marketChip: "市场与筹码", risk: "风险压力" };
+  return <div className="page-enter selection-page">
+    <div className="portfolio-head"><div><span>INStock · 因子特征库</span><h2>AI 选股实验室</h2><p>综合选股负责候选初筛；新闻情绪与 TradingAgents 继续独立复核。</p></div><div><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button className="ghost" onClick={()=>setRevision(x=>x+1)}>刷新数据</button></div></div>
+    <div className="selection-kpis"><Metric label="原始记录" value={num(coverage.rawRows,0)}/><Metric label="有效评分" value={num(coverage.scored,0)}/><Metric label="平均完整度" value={pct((coverage.averageCompleteness||0)*100)}/><Metric label="数据日期" value={data.dataDate||"无可用数据"}/></div>
+    <Section eyebrow="数据健康" title="来源与覆盖审计">
+      <div className={`selection-health ${data.status==='live'?'live':'offline'}`}><div><b>{data.status==='live'?'数据可用于候选初筛':'最近日期没有返回可评分记录'}</b><p>{data.status==='live'?`请求 ${data.requestedDate}，实际使用 ${data.dataDate}${data.fallbackDays?`（自动回退 ${data.fallbackDays} 天）`:''}。`:result.data?.meta?.warning||'请先运行 InStock 综合选股生成任务，并确认服务端可访问 INSTOCK_BASE_URL。'}</p></div><Badge toneName={data.status==='live'?'green':'amber'}>{data.status==='live'?'真实数据':'待接通'}</Badge></div>
+      <div className="factor-coverage">{Object.entries(factorLabels).map(([key,label])=><div key={key}><span>{label}</span><b>{num(coverage.factors?.[key],0)} 只</b></div>)}</div>
+      <SourceLine payload={result.data} />
+    </Section>
+    <Section eyebrow="透明评分" title="今日综合候选">
+      <DataState {...result} retry={result.retry} empty={!items.length} label="综合选股数据">
+        <div className="selection-table"><div className="selection-row head"><span>股票</span><span>综合</span>{Object.values(factorLabels).map(label=><span key={label}>{label}</span>)}<span>操作</span></div>{items.slice(0,30).map(item=><div className="selection-row" key={item.code}><span><b>{item.name}</b><small>{item.code} · {item.industry||'行业未标注'}</small></span><strong>{num(item.totalScore,1)}</strong>{Object.keys(factorLabels).map(key=><span key={key} className={key==='risk'?'risk-factor':''}>{item.factorScores?.[key]==null?'—':num(item.factorScores[key],1)}</span>)}<button className="text-btn" onClick={()=>onStock(item.code)}>TradingAgents 复核 →</button></div>)}</div>
+      </DataState>
+      <footer className="coverage">评分由基本面、成长估值、技术、市场筹码组成，并扣除风险压力；同类技术形态不重复累计。候选不等于买入建议。</footer>
+    </Section>
+  </div>;
 }
 function PortfolioWizard({ done }) {
   const today = new Date().toISOString().slice(0, 10),
@@ -2826,6 +2850,7 @@ export default function App() {
         ) : (
           <LoginRequired onLogin={() => setAuthOpen(true)} />
         ),
+        selection: <SelectionLab onStock={viewStock} />,
         stocks: <StockIntelligence initialCode={stock} onAsk={ask} />,
       })[page],
     [page, portfolioId, portfolioEntry, stock, user],
