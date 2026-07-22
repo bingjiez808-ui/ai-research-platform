@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPrisma } from '../research/prisma.js';
 import { TushareProvider } from './providers/tushare.js';
+import { requireAdminToken } from '../security.js';
 
 const dateKey=d=>d.toISOString().slice(0,10).replaceAll('-','');
 const num=v=>v==null?null:Number(v);
@@ -11,6 +12,6 @@ export async function runFullMarketScan({trigger='manual'}={}){const db=getPrism
 
 function present(run){const universe=run.actualUniverse||{},items=(run.results||[]).map(item=>({...item,totalScore:item.finalScore,agents:Object.entries(item.agents||{}).map(([name,value])=>({name,score:value.score,view:value.view,evidence:value.evidence}))}));return{...run,items,coverage:{status:universe.coverageRatio>=.85?'full':'insufficient',isFullMarket:universe.coverageRatio>=.85,totalListed:run.universeSize,scannedCount:run.coveredCount,candidateCount:run.candidateCount,coverageRatio:universe.coverageRatio},scannedAt:run.finishedAt,dataAsOf:run.tradeDate,stage:'多 Agent 深度复核完成',method:{stages:['全市场基础列表','当日快照初筛','候选历史/财务/新闻/风险复核','Top10 排序']}};}
 export const marketScanRouter=Router();
-marketScanRouter.post('/market/top10/run',async(req,res,next)=>{try{const data=present(await runFullMarketScan({trigger:'manual'}));res.json({success:true,data,meta:{mock:false,fullMarket:data.coverage.isFullMarket}});}catch(e){next(e);}});
+marketScanRouter.post('/market/top10/run',async(req,res,next)=>{try{requireAdminToken(req,'MARKET_SCAN_SCHEDULER_TOKEN','x-scheduler-token');const data=present(await runFullMarketScan({trigger:'manual'}));res.json({success:true,data,meta:{mock:false,fullMarket:data.coverage.isFullMarket}});}catch(e){next(e);}});
 marketScanRouter.get('/market/top10/latest',async(_req,res,next)=>{try{const run=await getPrisma().marketScanRun.findFirst({where:{status:{in:['succeeded','degraded']}},orderBy:{startedAt:'desc'}});if(!run)throw Object.assign(new Error('尚无完成的全市场扫描'),{status:404,code:'SCAN_NOT_FOUND'});res.json({success:true,data:present(run),meta:{mock:false}});}catch(e){next(e);}});
 marketScanRouter.post('/internal/scheduler/market-top10',async(req,res,next)=>{try{if(!process.env.MARKET_SCAN_SCHEDULER_TOKEN)throw Object.assign(new Error('MARKET_SCAN_SCHEDULER_TOKEN is not configured'),{status:503,code:'SCHEDULER_NOT_CONFIGURED'});if(req.get('x-scheduler-token')!==process.env.MARKET_SCAN_SCHEDULER_TOKEN)throw Object.assign(new Error('Invalid scheduler token'),{status:401,code:'INVALID_SCHEDULER_TOKEN'});res.json({success:true,data:await runFullMarketScan({trigger:'scheduler'})});}catch(e){next(e);}});
