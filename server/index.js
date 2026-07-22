@@ -14,6 +14,8 @@ import { dailySummaryRouter } from './finance/daily-summary.js';
 import { bootstrapLiveUniverse } from './finance/bootstrap-live-universe.js';
 import { startFreeDashboardRefresh } from './finance/news/background.js';
 import { backfillMarketEvidence } from './finance/evidence-backfill.js';
+import { ingestTushareBasic } from './finance/providers/ingest-tushare.js';
+import { getPrisma } from './research/prisma.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -64,6 +66,8 @@ app.listen(PORT, '0.0.0.0', () => {
   if(process.env.DATABASE_URL&&process.env.SCHEDULER_ENABLED!=='true')startFreeDashboardRefresh();
   if(process.env.DATABASE_URL&&process.env.LIVE_UNIVERSE_BOOTSTRAP!=='false')setTimeout(()=>bootstrapLiveUniverse().then(async result=>{
     console.log('Live universe bootstrap completed',result);
+    const industryCoverage=await getPrisma().stock.count({where:{status:'listed',industryId:{not:null}}});
+    if(industryCoverage<100)console.log('Tushare industry bootstrap completed',await ingestTushareBasic());
     if(process.env.TUSHARE_HISTORY_BACKFILL==='true')console.log('Tushare evidence backfill completed',await backfillMarketEvidence({historyDays:Number(process.env.TUSHARE_HISTORY_DAYS||45),maxFinancials:Number(process.env.TUSHARE_FINANCIAL_LIMIT||5),maxDailyRuns:Number(process.env.TUSHARE_BACKFILL_DATES_PER_RUN||1)}));
   }).catch(error=>console.error('Live universe/evidence bootstrap failed',{message:error.message})),5000);
 });
