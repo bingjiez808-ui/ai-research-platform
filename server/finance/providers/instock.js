@@ -148,8 +148,11 @@ function buildResult(rows, limit) {
 }
 
 export async function getInStockSelection({ date = new Date().toISOString().slice(0, 10), lookback = 10, limit = 100 } = {}) {
-  const baseUrl = String(process.env.INSTOCK_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ''), safeLimit = Math.min(500, Math.max(1, limit)); let cursor = date, lastError = null;
-  for (let attempt = 0; attempt <= lookback; attempt += 1) {
+  const configuredBaseUrl = process.env.INSTOCK_BASE_URL, baseUrl = String(configuredBaseUrl || DEFAULT_BASE_URL).replace(/\/$/, ''), safeLimit = Math.min(500, Math.max(1, limit)); let cursor = date, lastError = null;
+  // Render cannot reach the operator's laptop through localhost. In production,
+  // only attempt direct HTTP when an explicit reachable base URL is configured.
+  const directAttempts = configuredBaseUrl || process.env.NODE_ENV !== 'production' ? lookback + 1 : 0;
+  for (let attempt = 0; attempt < directAttempts; attempt += 1) {
     try {
       const url = new URL('/instock/api_data', baseUrl); url.searchParams.set('name', TABLE); url.searchParams.set('date', cursor);
       const rows = unwrapInStockRows(await fetchJson(url));
@@ -157,6 +160,7 @@ export async function getInStockSelection({ date = new Date().toISOString().slic
     } catch (error) { lastError = error; }
     cursor = previousDate(cursor);
   }
+  if (!directAttempts) lastError = new Error('生产环境未配置可访问的 INSTOCK_BASE_URL');
   if (process.env.DATABASE_URL) { const { readCache } = await import('./cache.js'), cached = await readCache('instock', CACHE_KEY, { allowStale: true }).catch(() => null); if (cached?.payload?.items?.length) return { ...cached.payload, status: 'cached-sync', requestedDate: date, source: `InStock 本机受保护同步 · ${TABLE}`, cacheFetchedAt: cached.fetchedAt, reason: lastError ? `本机直连不可用，使用最近同步快照：${lastError.message}` : '使用最近同步快照' }; }
   return { status: 'unavailable', requestedDate: date, dataDate: null, fallbackDays: lookback, items: [], coverage: { rawRows: 0, normalized: 0, scored: 0, eligible: 0, returned: 0, averageCompleteness: 0, factors: {} }, source: `${baseUrl} · ${TABLE}`, reason: lastError ? lastError.message : `最近 ${lookback + 1} 个自然日均无记录` };
 }
