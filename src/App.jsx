@@ -1430,18 +1430,19 @@ function SelectionLab({ onStock }) {
   const [revision, setRevision] = useState(0);
   const result = useApi((signal) => api.selectionLab({ date, limit: 50 }, signal), [date, revision]);
   const data = result.data?.data || {}, items = data.items || [], coverage = data.coverage || {};
+  const connected = data.status === 'live' || data.status === 'cached-sync';
   const factorLabels = { quality: "基本面质量", growthValuation: "成长与估值", technical: "技术触发", marketChip: "市场与筹码", risk: "风险压力" };
   return <div className="page-enter selection-page">
     <div className="portfolio-head"><div><span>INStock · 因子特征库</span><h2>AI 选股实验室</h2><p>综合选股负责候选初筛；新闻情绪与 TradingAgents 继续独立复核。</p></div><div><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button className="ghost" onClick={()=>setRevision(x=>x+1)}>刷新数据</button></div></div>
     <div className="selection-kpis"><Metric label="原始记录" value={num(coverage.rawRows,0)}/><Metric label="有效评分" value={num(coverage.scored,0)}/><Metric label="平均完整度" value={pct((coverage.averageCompleteness||0)*100)}/><Metric label="数据日期" value={data.dataDate||"无可用数据"}/></div>
     <Section eyebrow="数据健康" title="来源与覆盖审计">
-      <div className={`selection-health ${data.status==='live'?'live':'offline'}`}><div><b>{data.status==='live'?'数据可用于候选初筛':'最近日期没有返回可评分记录'}</b><p>{data.status==='live'?`请求 ${data.requestedDate}，实际使用 ${data.dataDate}${data.fallbackDays?`（自动回退 ${data.fallbackDays} 天）`:''}。`:result.data?.meta?.warning||'请先运行 InStock 综合选股生成任务，并确认服务端可访问 INSTOCK_BASE_URL。'}</p></div><Badge toneName={data.status==='live'?'green':'amber'}>{data.status==='live'?'真实数据':'待接通'}</Badge></div>
+      <div className={`selection-health ${connected?'live':'offline'}`}><div><b>{connected?'数据可用于候选初筛':'最近日期没有返回可评分记录'}</b><p>{connected?`请求 ${data.requestedDate}，实际使用 ${data.dataDate}${data.status==='cached-sync'?'（本机受保护同步快照）':data.fallbackDays?`（自动回退 ${data.fallbackDays} 天）`:''}。`:result.data?.meta?.warning||'请先运行 InStock 综合选股生成任务，并确认本机 9988 服务已启动。'}</p></div><Badge toneName={connected?'green':'amber'}>{data.status==='live'?'本机实时':data.status==='cached-sync'?'已同步真实数据':'待接通'}</Badge></div>
       <div className="factor-coverage">{Object.entries(factorLabels).map(([key,label])=><div key={key}><span>{label}</span><b>{num(coverage.factors?.[key],0)} 只</b></div>)}</div>
       <SourceLine payload={result.data} />
     </Section>
     <Section eyebrow="透明评分" title="今日综合候选">
       <DataState {...result} retry={result.retry} empty={!items.length} label="综合选股数据">
-        <div className="selection-table"><div className="selection-row head"><span>股票</span><span>综合</span>{Object.values(factorLabels).map(label=><span key={label}>{label}</span>)}<span>操作</span></div>{items.slice(0,30).map(item=><div className="selection-row" key={item.code}><span><b>{item.name}</b><small>{item.code} · {item.industry||'行业未标注'}</small></span><strong>{num(item.totalScore,1)}</strong>{Object.keys(factorLabels).map(key=><span key={key} className={key==='risk'?'risk-factor':''}>{item.factorScores?.[key]==null?'—':num(item.factorScores[key],1)}</span>)}<button className="text-btn" onClick={()=>onStock(item.code)}>TradingAgents 复核 →</button></div>)}</div>
+        <div className="selection-table"><div className="selection-row head"><span>股票 / 技术证据</span><span>综合</span>{Object.values(factorLabels).map(label=><span key={label}>{label}</span>)}<span>操作</span></div>{items.slice(0,30).map(item=>{const t=item.technicalEvidence||{},triggers=[t.macdDaily&&'日MACD金叉',t.macdWeekly&&'周MACD金叉',t.aboveMa20&&'突破MA20',t.longMaAlignment&&'均线多头',t.breakout&&'突破形态'].filter(Boolean);return <div className="selection-row" key={item.code}><span><b>{item.name}</b><small>{item.code} · {item.industry||'行业未标注'} · {triggers.join(' / ')||`量比 ${num(t.volumeRatio,2)} · 换手 ${num(t.turnoverRate,2)}%`}</small></span><strong>{num(item.totalScore,1)}</strong>{Object.keys(factorLabels).map(key=><span key={key} className={key==='risk'?'risk-factor':''}>{item.factorScores?.[key]==null?'—':num(item.factorScores[key],1)}</span>)}<button className="text-btn" onClick={()=>onStock(item.code)}>TradingAgents 复核 →</button></div>})}</div>
       </DataState>
       <footer className="coverage">评分由基本面、成长估值、技术、市场筹码组成，并扣除风险压力；同类技术形态不重复累计。候选不等于买入建议。</footer>
     </Section>

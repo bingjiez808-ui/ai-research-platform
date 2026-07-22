@@ -64,6 +64,6 @@ app.listen(PORT, '0.0.0.0', () => {
   if(process.env.DATABASE_URL&&process.env.SCHEDULER_ENABLED!=='true')startFreeDashboardRefresh();
   if(process.env.DATABASE_URL&&process.env.LIVE_UNIVERSE_BOOTSTRAP!=='false')setTimeout(()=>bootstrapLiveUniverse().then(async result=>{
     console.log('Live universe bootstrap completed',result);
-    if(process.env.TUSHARE_HISTORY_BACKFILL!=='false')console.log('Tushare evidence backfill completed',await backfillMarketEvidence({historyDays:Number(process.env.TUSHARE_HISTORY_DAYS||45),maxFinancials:Number(process.env.TUSHARE_FINANCIAL_LIMIT||20)}));
+    if(process.env.TUSHARE_HISTORY_BACKFILL==='true')console.log('Tushare evidence backfill completed',await backfillMarketEvidence({historyDays:Number(process.env.TUSHARE_HISTORY_DAYS||45),maxFinancials:Number(process.env.TUSHARE_FINANCIAL_LIMIT||5),maxDailyRuns:Number(process.env.TUSHARE_BACKFILL_DATES_PER_RUN||1)}));
   }).catch(error=>console.error('Live universe/evidence bootstrap failed',{message:error.message})),5000);
 });

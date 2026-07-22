@@ -27,6 +27,7 @@
     "production:job": "node --env-file-if-exists=.env scripts/run-production-job.js",
     "scheduler:start": "node --env-file-if-exists=.env scripts/scheduler-daemon.js",
     "tushare:sync": "node --env-file-if-exists=.env scripts/tushare-sync.js"
+    ,"instock:sync": "node --env-file-if-exists=.env scripts/sync-instock-selection.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

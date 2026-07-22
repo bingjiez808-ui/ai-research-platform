@@ -15,13 +15,14 @@ export function recentWeekdays(count=45,now=new Date()){
   return days.reverse();
 }
 
-export async function backfillMarketEvidence({historyDays=45,maxFinancials=20}={}){
+export async function backfillMarketEvidence({historyDays=45,maxFinancials=20,maxDailyRuns=1}={}){
   const provider=new TushareProvider();
   if(!provider.isConfigured())return{skipped:true,reason:'tushare-not-configured'};
   const db=getPrisma(),source=await db.dataSource.findUnique({where:{key:'tushare'}}),dates=recentWeekdays(historyDays);
   const existing=source?await db.stockPrice.groupBy({by:['tradeDate'],where:{sourceId:source.id,interval:'1d',tradeDate:{in:dates.map(value=>new Date(`${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}T00:00:00Z`))}},_count:{_all:true}}):[];
   const covered=new Set(existing.filter(row=>row._count._all>=1000).map(row=>ymd(row.tradeDate))),daily=[];
-  for(const tradeDate of dates.filter(value=>!covered.has(value))){
+  const missing=dates.filter(value=>!covered.has(value)).slice(-Math.max(0,maxDailyRuns));
+  for(const tradeDate of missing){
     try{daily.push(await ingestTushareDaily(tradeDate));}
     catch(error){daily.push({tradeDate,error:error.message});}
     await sleep(Number(process.env.TUSHARE_BACKFILL_DELAY_MS||850));
@@ -33,5 +34,5 @@ export async function backfillMarketEvidence({historyDays=45,maxFinancials=20}={
     catch(error){financials.push({tsCode,error:error.message});}
     await sleep(Number(process.env.TUSHARE_BACKFILL_DELAY_MS||850));
   }
-  return{historyDays,datesRequested:daily.length,daily,financials,finishedAt:new Date().toISOString()};
+  return{historyDays,missingDates:dates.length-covered.size,datesRequested:daily.length,daily,financials,finishedAt:new Date().toISOString()};
 }
