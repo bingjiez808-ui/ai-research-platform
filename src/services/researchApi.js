@@ -65,6 +65,8 @@ export const api = {
   hotSectors: (signal) => request("/market/hot-sectors", { signal }),
   newsIntelligence: (signal) =>
     request("/market/news-intelligence", { signal }),
+  selectionLab: (params, signal) =>
+    request("/market/selection-lab", { params, signal }),
   evaluateStrategy: (data) =>
     request("/strategies/evaluate", { method: "POST", body: data }),
   dailySummary: (signal) =>
