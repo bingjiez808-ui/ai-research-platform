@@ -1433,19 +1433,22 @@ function SelectionLab({ onStock }) {
   const data = result.data?.data || {}, items = data.items || [], coverage = data.coverage || {};
   const connected = data.status === 'live' || data.status === 'cached-sync' || data.status === 'database-fallback';
   const factorLabels = { quality: "基本面质量", growthValuation: "成长与估值", technical: "技术触发", marketChip: "市场与筹码", risk: "风险压力" };
+  const funnel = [["全量快照",coverage.rawRows],["风险排除",coverage.riskExcluded],["质量未过闸",coverage.qualityRejected],["证据不足",coverage.evidenceRejected],["最终候选",coverage.eligible]];
   return <div className="page-enter selection-page">
     <div className="portfolio-head"><div><span>INStock · 因子特征库</span><h2>AI 选股实验室</h2><p>综合选股负责候选初筛；新闻情绪与 TradingAgents 继续独立复核。</p></div><div><input type="date" value={date} onChange={e=>setDate(e.target.value)}/><button className="ghost" onClick={()=>setRevision(x=>x+1)}>刷新数据</button></div></div>
-    <div className="selection-kpis"><Metric label="原始记录" value={num(coverage.rawRows,0)}/><Metric label="有效评分" value={num(coverage.scored,0)}/><Metric label="平均完整度" value={pct((coverage.averageCompleteness||0)*100)}/><Metric label="数据日期" value={data.dataDate||"无可用数据"}/></div>
+    <div className="selection-kpis"><Metric label="全量快照" value={num(coverage.rawRows,0)}/><Metric label="通过多维筛选" value={num(coverage.eligible,0)}/><Metric label="候选平均完整度" value={pct((coverage.averageCompleteness||0)*100)}/><Metric label="数据日期" value={data.dataDate||"无可用数据"}/></div>
     <Section eyebrow="数据健康" title="来源与覆盖审计">
       <div className={`selection-health ${connected?'live':'offline'}`}><div><b>{connected?'数据可用于候选初筛':'最近日期没有返回可评分记录'}</b><p>{connected?`请求 ${data.requestedDate}，实际使用 ${data.dataDate}${data.status==='cached-sync'?'（本机受保护同步快照）':data.status==='database-fallback'?'（云端真实数据降级）':data.fallbackDays?`（自动回退 ${data.fallbackDays} 天）`:''}。`:result.data?.meta?.warning||'请先运行 InStock 综合选股生成任务，并确认本机 9988 服务已启动。'}</p></div><Badge toneName={connected?'green':'amber'}>{data.status==='live'?'本机实时':data.status==='cached-sync'?'已同步真实数据':data.status==='database-fallback'?'云端真实数据':'待接通'}</Badge></div>
       <div className="factor-coverage">{Object.entries(factorLabels).map(([key,label])=><div key={key}><span>{label}</span><b>{num(coverage.factors?.[key],0)} 只</b></div>)}</div>
+      <div className="selection-funnel">{funnel.map(([label,value],index)=><div key={label} className={index===funnel.length-1?'selected':''}><span>{label}</span><b>{num(value,0)}</b>{index<funnel.length-1&&<i>→</i>}</div>)}</div>
       <SourceLine payload={result.data} />
     </Section>
-    <Section eyebrow="透明评分" title="今日综合候选">
+    <Section eyebrow="透明评分 · V1.1" title="通过硬筛与多维闸门的今日候选">
       <DataState {...result} retry={result.retry} empty={!items.length} label="综合选股数据">
-        <div className="selection-table"><div className="selection-row head"><span>股票 / 技术证据</span><span>综合</span>{Object.values(factorLabels).map(label=><span key={label}>{label}</span>)}<span>操作</span></div>{items.slice(0,30).map(item=>{const t=item.technicalEvidence||{},triggers=[t.macdDaily&&'日MACD金叉',t.macdWeekly&&'周MACD金叉',t.aboveMa20&&'突破MA20',t.longMaAlignment&&'均线多头',t.breakout&&'突破形态'].filter(Boolean);return <div className="selection-row" key={item.code}><span><b>{item.name}</b><small>{item.code} · {item.industry||'行业未标注'} · {triggers.join(' / ')||`量比 ${num(t.volumeRatio,2)} · 换手 ${num(t.turnoverRate,2)}%`}</small></span><strong>{num(item.totalScore,1)}</strong>{Object.keys(factorLabels).map(key=><span key={key} className={key==='risk'?'risk-factor':''}>{item.factorScores?.[key]==null?'—':num(item.factorScores[key],1)}</span>)}<button className="text-btn" onClick={()=>onStock(item.code)}>TradingAgents 复核 →</button></div>})}</div>
+        <div className="selection-table"><div className="selection-row head"><span>股票 / 入选依据</span><span>综合</span>{Object.values(factorLabels).map(label=><span key={label}>{label}</span>)}<span>操作</span></div>{items.slice(0,30).map(item=><div className="selection-row" key={item.code}><span><b>{item.name} <em>{item.screeningStatus==='near-trigger'?'接近触发':item.screeningStatus==='watch'?'观察':'中性'}</em></b><small>{item.code} · {item.industry||'行业未标注'} · {(item.screeningReasons||[]).join(' / ')||'已通过多维闸门'}</small><small>证据完整率 {pct((item.evidenceCompleteness||0)*100)} · 仍需行情、公告与新闻复核</small></span><strong>{num(item.totalScore,1)}</strong>{Object.keys(factorLabels).map(key=><span key={key} className={key==='risk'?'risk-factor':''}>{item.factorScores?.[key]==null?'—':num(item.factorScores[key],1)}</span>)}<button className="text-btn" onClick={()=>onStock(item.code)}>TradingAgents 复核 →</button></div>)}</div>
       </DataState>
-      <footer className="coverage">评分由基本面、成长估值、技术、市场筹码组成，并扣除风险压力；同类技术形态不重复累计。候选不等于买入建议。</footer>
+      <div className="factor-method"><b>{data.methodology?.version||'InStock 多维策略'}</b><span>代表指标：{data.methodology?.factorMethod?.selected?.join(' · ')||'盈利、成长估值、趋势量价、资金、风险'}</span><small>去冗余：{data.methodology?.factorMethod?.excludedDuplicates?.join('；')||'同类指标不重复加权'}。质量分 ≥ {data.methodology?.qualityGate||70}，至少 {data.methodology?.minimumDimensions||3} 个维度，关键证据完整率 ≥ {Math.round((data.methodology?.minimumCompleteness||.55)*100)}%。</small></div>
+      <footer className="coverage">先排除 ST、上市不足、低流动性、亏损、负现金流、高负债和短期过热，再计算候选分。候选不等于买入建议，必须经 TradingAgents 的行情、公告、新闻与风险复核。</footer>
     </Section>
   </div>;
 }
