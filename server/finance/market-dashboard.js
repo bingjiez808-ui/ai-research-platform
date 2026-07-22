@@ -14,6 +14,7 @@ import { getInStockSelection } from './providers/instock.js';
 export const marketDashboardRouter = Router();
 const asNumber = value => value == null ? null : Number(value);
 const clamp = value => Math.max(0, Math.min(100, value));
+const uniqueDailyPrices = prices => [...new Map(prices.map(price=>[new Date(price.tradeDate).toISOString().slice(0,10),price])).values()];
 const disclosure = '透明确定性规则，仅供研究；不预测收益、不构成投资建议。行情可能延迟，历史信号不代表未来表现。';
 
 async function realtimeIndustryRanking(){const db=getPrisma(),stocks=await db.stock.findMany({where:{status:'listed',industryId:{not:null}},select:{code:true,name:true,industry:{select:{name:true}}}}),quotes=await getStockQuotes(stocks.map(stock=>stock.code)),stockByCode=new Map(stocks.map(stock=>[stock.code,stock])),groups=new Map();for(const quote of quotes){const stock=stockByCode.get(quote.code),name=stock?.industry?.name;if(!name)continue;const group=groups.get(name)||{name,changes:[],stocks:[]};group.changes.push(Number(quote.change));group.stocks.push({code:quote.code,name:stock.name,price:quote.price,changePercent:quote.change});groups.set(name,group);}return[...groups.values()].map(group=>({name:group.name,changePercent:group.changes.reduce((sum,value)=>sum+value,0)/group.changes.length,stockCount:group.stocks.length,topStocks:group.stocks.sort((a,b)=>b.changePercent-a.changePercent).slice(0,5),source:'腾讯实时行情（当前入库股票行业聚合）'})).sort((a,b)=>b.changePercent-a.changePercent);}
@@ -54,7 +55,7 @@ marketDashboardRouter.get('/market/ai-summary', async (_req, res, next) => { try
 } catch(error){next(error);} });
 
 function scoreStock(stock) {
-  const prices=[...stock.prices].reverse(),latest=prices.at(-1), closes=prices.map(x=>asNumber(x.close)).filter(Number.isFinite),f=stock.statements[0];
+  const prices=uniqueDailyPrices([...stock.prices].reverse()),latest=prices.at(-1), closes=prices.map(x=>asNumber(x.close)).filter(Number.isFinite),f=stock.statements[0];
   const change20=closes.length>=21?(closes.at(-1)/closes.at(-21)-1)*100:null,change=asNumber(latest?.changePercent),roe=asNumber(f?.roe),pe=asNumber(latest?.pe),pb=asNumber(latest?.pb);
   const news=stock.news||[],keywordSentiment=title=>{const text=String(title||'').toLowerCase(),positive=['增长','增持','回购','中标','突破','创新高','profit','growth','buyback','upgrade'],negativeWords=['亏损','减持','处罚','调查','诉讼','下滑','风险','loss','probe','penalty','downgrade'];return positive.some(word=>text.includes(word))?0.35:negativeWords.some(word=>text.includes(word))?-0.35:0;},sentiments=news.map(x=>asNumber(x.sentiment)??keywordSentiment(x.title)),newsMean=sentiments.length?sentiments.reduce((a,b)=>a+b,0)/sentiments.length:null,negative=sentiments.filter(x=>x<-.2).length;
   const citations=[...prices.slice(-3).map(x=>({type:'market',title:`${stock.code} ${x.tradeDate.toISOString().slice(0,10)} 日线`,url:x.sourceUrl,source:x.source?.name,asOf:x.tradeDate,fetchedAt:x.fetchedAt,data:{close:asNumber(x.close),changePercent:asNumber(x.changePercent)}})),...(f?[{type:'fundamental',title:`${stock.code} ${f.periodEnd.toISOString().slice(0,10)} 财务数据`,url:f.sourceUrl,source:f.source?.name,asOf:f.periodEnd,fetchedAt:f.fetchedAt,data:{roe,netProfit:asNumber(f.netProfit),revenue:asNumber(f.revenue)}}]:[]),...news.slice(0,5).map(x=>({type:'news',title:x.title,url:x.url,source:x.source?.name,asOf:x.publishedAt,fetchedAt:x.fetchedAt,data:{sentiment:asNumber(x.sentiment)}}))];
@@ -89,7 +90,7 @@ marketDashboardRouter.get('/market/recommendations/top10', async (_req,res,next)
 
 function ema(values, period) { const k=2/(period+1); let x=values[0]; return values.map((v,i)=>x=i?v*k+x*(1-k):v); }
 function signals(stock) {
-  const rows=[...stock.prices].reverse(), closes=rows.map(x=>asNumber(x.close)), latest=rows.at(-1), out=[];
+  const rows=uniqueDailyPrices([...stock.prices].reverse()), closes=rows.map(x=>asNumber(x.close)), latest=rows.at(-1), out=[];
   const ch=asNumber(latest?.changePercent); if(ch>=3&&ch<=5)out.push({type:'up_3_5',evidence:{changePercent:ch,tradeDate:latest.tradeDate}});
   if(closes.length>=35){const fast=ema(closes,12),slow=ema(closes,26),dif=fast.map((v,i)=>v-slow[i]),dea=ema(dif,9),n=dif.length-1;if(dif[n]>dea[n]&&dif[n-1]<=dea[n-1])out.push({type:'macd_golden_cross',evidence:{dif:dif[n],dea:dea[n],previousDif:dif[n-1],previousDea:dea[n-1],parameters:'EMA(12,26,9)'}});}
   if(rows.length>=3){const last=rows.slice(-3),bull=last.every(x=>asNumber(x.close)>asNumber(x.open)); const rising=asNumber(last[1].close)>asNumber(last[0].close)&&asNumber(last[2].close)>asNumber(last[1].close); if(bull&&rising)out.push({type:'three_white_soldiers',aliases:['三红兵','三武士'],evidence:{dates:last.map(x=>x.tradeDate),opens:last.map(x=>asNumber(x.open)),closes:last.map(x=>asNumber(x.close)),definition:'连续三根阳线且收盘价逐日抬高'}});}

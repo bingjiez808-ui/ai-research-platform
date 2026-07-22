@@ -192,17 +192,19 @@ function TopRecommendations({ items = [], payload, onStock }) {
   const [open, setOpen] = useState("");
   const contract = payload?.data || {},
     coverage = contract.coverage || payload?.meta?.coverage || {},
-    complete = coverage.isFullMarket === true || coverage.status === "full",
+    complete = coverage.isFullMarket === true || coverage.status === "full" ||
+      (Number(coverage.candidatesScored)>0 && coverage.candidatesScored===coverage.totalListed),
+    evaluated = Number(coverage.candidatesScored ?? coverage.scanned ?? 0)>0,
     scanned =
       coverage.scanned ?? coverage.scannedCount ?? coverage.candidatesScored,
     total = coverage.total ?? coverage.totalListed ?? coverage.candidatesScored;
   return (
     <div className="ranking-list top-contract">
       <div className={`scan-contract ${complete ? "" : "insufficient"}`}>
-        <b>{complete ? "全市场扫描" : "覆盖不足"}</b>
+        <b>{complete ? "全市场扫描" : evaluated ? "候选已评估" : "覆盖不足"}</b>
         <span>
           覆盖 {num(scanned, 0)} / {num(total, 0)} 只（
-          {complete ? "免费行情全市场快照" : "当前可用候选范围"}）
+          {complete ? "真实行情候选全集" : evaluated ? "当前已入库候选" : "当前可用候选范围"}）
         </span>
         <span>
           扫描阶段：{contract.stage || coverage.stage || "最终 Top10"}
