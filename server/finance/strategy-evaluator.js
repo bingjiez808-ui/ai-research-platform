@@ -1,4 +1,5 @@
 import { getPrisma } from '../research/prisma.js';
+import { getTopSectorScope, stockMatchesSector } from './hot-sector-scope.js';
 
 const clamp=value=>Math.max(0,Math.min(100,value));
 const number=(value,fallback=null)=>value==null||value===''?fallback:Number(value);
@@ -21,8 +22,9 @@ function evaluate(stock,strategy){
 
 export async function evaluateStrategy(input){
   const strategy=normalizeStrategy(input);if(!Object.keys(strategy.rules).length&&!strategy.industries.length)throw Object.assign(new Error('至少设置一条选股规则或行业范围'),{status:400,code:'STRATEGY_RULE_REQUIRED'});
-  const stocks=await getPrisma().stock.findMany({where:{status:'listed',prices:{some:{interval:'1d'}}},take:6000,include:{industry:true,prices:{where:{interval:'1d'},take:1,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:1,orderBy:{periodEnd:'desc'},include:{source:true}}}});
-  const ranked=stocks.map(x=>evaluate(x,strategy)).sort((a,b)=>b.matchScore-a.matchScore),items=ranked.slice(0,strategy.limit),missing=items.flatMap(x=>x.gaps.filter(g=>g.status==='missing').map(g=>g.label));
+  const scope=await getTopSectorScope(3);if(!scope.sectors.length)return{strategy,hotSectors:[],items:[],optimization:{suggestions:['热点板块证据不足，本次不跨板块执行用户策略。'],method:'热门前三板块 → 用户规则距离 → 数据完整度'},coverage:{sectorCount:0,evaluated:0,returned:0,scope:'hot-sector-top3'},asOf:new Date(),disclosure:'候选仅表示最接近用户规则，不是买入建议。'};
+  const stocks=await getPrisma().stock.findMany({where:{status:'listed',prices:{some:{interval:'1d'}},...scope.where},take:1500,include:{industry:true,prices:{where:{interval:'1d'},take:1,orderBy:{tradeDate:'desc'},include:{source:true}},statements:{take:1,orderBy:{periodEnd:'desc'},include:{source:true}}}});
+  const ranked=stocks.map(x=>{const result=evaluate(x,strategy),sector=scope.sectors.find(item=>stockMatchesSector(x,item));return{...result,hotSector:sector?{rank:scope.sectors.indexOf(sector)+1,name:sector.name,score:sector.score}:null};}).sort((a,b)=>b.matchScore-a.matchScore),items=ranked.slice(0,strategy.limit),missing=items.flatMap(x=>x.gaps.filter(g=>g.status==='missing').map(g=>g.label));
   const suggestions=[];if(missing.length)suggestions.push(`Top 候选仍有 ${new Set(missing).size} 类字段缺失；建议补齐财务和估值后再提高门槛。`);if(items[0]?.matchScore<70)suggestions.push('当前规则与可用股票匹配度偏低，可适度放宽差距最大的条件。');if(!suggestions.length)suggestions.push('当前规则区分度有效；建议保留前 10 名并用次日价格与公告做人工复核。');
-  return{strategy,items,optimization:{suggestions,method:'按规则距离、数据完整度排序；不修改用户硬约束，不执行用户代码。'},coverage:{listedWithPrice:stocks.length,evaluated:ranked.length,returned:items.length},asOf:new Date(),disclosure:'候选仅表示最接近用户规则，不是买入建议；接口不承诺次日表现。'};
+  return{strategy,hotSectors:scope.metadata,items,optimization:{suggestions,method:'先限定热门前三板块，再按用户规则距离与数据完整度排序；不修改用户硬约束，不执行用户代码。'},coverage:{sectorCount:scope.sectors.length,listedWithPrice:stocks.length,evaluated:ranked.length,returned:items.length,scope:'hot-sector-top3'},asOf:new Date(),disclosure:'候选仅表示热门前三板块内最接近用户规则，不是买入建议；接口不承诺次日表现。'};
 }

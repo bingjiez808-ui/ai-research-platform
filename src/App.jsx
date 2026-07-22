@@ -209,6 +209,7 @@ function TopRecommendations({ items = [], payload, onStock }) {
         <span>
           扫描阶段：{contract.stage || coverage.stage || "最终 Top10"}
         </span>
+        {contract.hotSectors?.length ? <span>限定热门前三：{contract.hotSectors.map(x=>`${x.rank}. ${x.name}（${num(x.score,1)}）`).join(" · ")}</span> : null}
         <span>
           扫描时间{" "}
           {cnTime(
@@ -870,7 +871,7 @@ function CommandCenter({ portfolioId, goPortfolio, onAsk, onStock }) {
                 )}
               </div>
               <footer className="coverage">
-                数据覆盖：上市 {num(scan.coverage?.listed, 0)} 只 · 日线{" "}
+                范围：{scan.hotSectors?.map(x=>`${x.rank}. ${x.name}`).join(" · ")||"热点板块证据不足"}<br/>数据覆盖：板块内 {num(scan.coverage?.listed, 0)} 只 · 日线{" "}
                 {num(scan.coverage?.withDailyHistory, 0)} 只 · MACD有效{" "}
                 {num(scan.coverage?.macdEligible, 0)} 只 · 更新{" "}
                 {cnTime(scan.updatedAt || screener.data?.meta?.updatedAt)}
@@ -1421,7 +1422,7 @@ function StrategyLab() {
   const run = async () => { setBusy(true); setError(""); try { const payload = await api.evaluateStrategy({ name: form.name, rules: { minRoe: form.minRoe, maxPe: form.maxPe, maxPb: form.maxPb, minMarketCapYi: form.minMarketCapYi, maxChangePercent: form.maxChangePercent, minTurnoverRate: form.minTurnoverRate }, industries: form.industries.split(/[、,，]/).filter(Boolean), limit: 10 }); setResult(payload); } catch (x) { setError(x.message); } finally { setBusy(false); } };
   const data = result?.data;
   return <Section eyebrow="策略 API · 每日匹配" title="让 AI 找到最接近你规则的股票" className="strategy-lab">
-    <div className="strategy-layout"><div className="strategy-form"><label>策略名称<input value={form.name} onChange={e => setForm({...form,name:e.target.value})}/></label><div className="strategy-fields">{[["minRoe","ROE ≥","%"],["maxPe","PE ≤","倍"],["maxPb","PB ≤","倍"],["minMarketCapYi","市值 ≥","亿元"],["maxChangePercent","当日涨幅 ≤","%"],["minTurnoverRate","换手率 ≥","%"]].map(([key,label,unit])=><label key={key}>{label}<div><input type="number" step="any" value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/><small>{unit}</small></div></label>)}</div><label>限定行业（可选，逗号分隔）<input value={form.industries} onChange={e=>setForm({...form,industries:e.target.value})} placeholder="半导体、医药生物"/></label><button className="primary" disabled={busy} onClick={run}>{busy?"正在扫描真实股票库…":"运行策略并生成每日候选"}</button>{error&&<p className="form-error">{error}</p>}<p className="api-contract">接口：POST /api/strategies/evaluate · 仅接收声明式规则，不执行用户脚本。</p></div><div className="strategy-results">{data?<><header><div><b>今日最接近策略的股票</b><small>扫描 {data.coverage?.evaluated || 0} 只 · {cnTime(data.asOf)}</small></div><Badge toneName="blue">规则距离排序</Badge></header>{data.items?.map((item,index)=><article key={item.code}><i>{index+1}</i><div><b>{item.name} <small>{item.code} · {item.industry}</small></b><p>{item.gaps?.filter(g=>g.status!=="pass").slice(0,2).map(g=>g.status==="missing"?`${g.label}缺失`:`${g.label}差 ${g.gap}`).join("；")||"所有已配置规则均通过"}</p></div><strong>{item.matchScore}<small>匹配度</small></strong></article>)}<footer>{data.optimization?.suggestions?.join(" ")}<br/>{data.disclosure}</footer></>:<Empty title="等待运行策略" copy="系统会按规则距离与数据完整度排序，返回最接近而不是虚构“必涨”的股票。"/>}</div></div>
+    <div className="strategy-layout"><div className="strategy-form"><label>策略名称<input value={form.name} onChange={e => setForm({...form,name:e.target.value})}/></label><div className="strategy-fields">{[["minRoe","ROE ≥","%"],["maxPe","PE ≤","倍"],["maxPb","PB ≤","倍"],["minMarketCapYi","市值 ≥","亿元"],["maxChangePercent","当日涨幅 ≤","%"],["minTurnoverRate","换手率 ≥","%"]].map(([key,label,unit])=><label key={key}>{label}<div><input type="number" step="any" value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}/><small>{unit}</small></div></label>)}</div><label>限定行业（可选，逗号分隔）<input value={form.industries} onChange={e=>setForm({...form,industries:e.target.value})} placeholder="在热门前三板块内进一步限定"/></label><button className="primary" disabled={busy} onClick={run}>{busy?"正在扫描热门前三板块…":"运行策略并生成每日候选"}</button>{error&&<p className="form-error">{error}</p>}<p className="api-contract">默认范围：热门前三板块 → 用户规则扫描 → AI 复核；不执行用户脚本。</p></div><div className="strategy-results">{data?<><header><div><b>热门前三板块内最接近策略的股票</b><small>{data.hotSectors?.map(x=>`${x.rank}. ${x.name}`).join(" · ")||"热点证据不足"} · 扫描 {data.coverage?.evaluated || 0} 只</small></div><Badge toneName="blue">规则距离排序</Badge></header>{data.items?.map((item,index)=><article key={item.code}><i>{index+1}</i><div><b>{item.name} <small>{item.code} · {item.industry}</small></b><p>{item.hotSector?`热门板块 #${item.hotSector.rank} ${item.hotSector.name}；`:""}{item.gaps?.filter(g=>g.status!=="pass").slice(0,2).map(g=>g.status==="missing"?`${g.label}缺失`:`${g.label}差 ${g.gap}`).join("；")||"所有已配置规则均通过"}</p></div><strong>{item.matchScore}<small>匹配度</small></strong></article>)}<footer>{data.optimization?.suggestions?.join(" ")}<br/>{data.disclosure}</footer></>:<Empty title="等待运行策略" copy="系统会先限定热门前三板块，再按规则距离与数据完整度排序。"/>}</div></div>
   </Section>;
 }
 
